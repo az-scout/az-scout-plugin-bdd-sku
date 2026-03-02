@@ -91,9 +91,7 @@ def get_spot_eviction_rates(
     return asyncio.run(_spot_eviction_rates_async(region, sku_name, job_id))
 
 
-async def _spot_eviction_rates_async(
-    region: str, sku_name: str, job_id: str
-) -> dict[str, Any]:
+async def _spot_eviction_rates_async(region: str, sku_name: str, job_id: str) -> dict[str, Any]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
 
@@ -107,9 +105,7 @@ async def _spot_eviction_rates_async(
         clauses.append("job_id = %(job_id)s")
         params["job_id"] = job_id
     else:
-        clauses.append(
-            "job_datetime = (SELECT MAX(job_datetime) FROM spot_eviction_rates)"
-        )
+        clauses.append("job_datetime = (SELECT MAX(job_datetime) FROM spot_eviction_rates)")
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     params["limit"] = 200
@@ -152,9 +148,7 @@ def get_spot_price_history(
     return asyncio.run(_spot_price_history_async(region, sku_name, os_type))
 
 
-async def _spot_price_history_async(
-    region: str, sku_name: str, os_type: str
-) -> dict[str, Any]:
+async def _spot_price_history_async(region: str, sku_name: str, os_type: str) -> dict[str, Any]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
 

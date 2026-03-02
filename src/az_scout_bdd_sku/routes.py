@@ -119,11 +119,7 @@ async def spot_eviction_rates(
         params["job_id"] = job_id
     else:
         # Default: latest snapshot only
-        clauses.append(
-            "job_datetime = ("
-            "SELECT MAX(job_datetime) FROM spot_eviction_rates"
-            ")"
-        )
+        clauses.append("job_datetime = (SELECT MAX(job_datetime) FROM spot_eviction_rates)")
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     params["limit"] = limit
