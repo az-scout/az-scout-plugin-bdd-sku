@@ -39,6 +39,12 @@ class BddSkuPlugin:
             get_spot_eviction_history,
             get_spot_eviction_rates,
             get_spot_price_history,
+            v1_eviction_rates,
+            v1_eviction_rates_latest,
+            v1_list_locations,
+            v1_list_skus,
+            v1_retail_prices,
+            v1_status,
         )
 
         return [
@@ -46,6 +52,12 @@ class BddSkuPlugin:
             get_spot_eviction_rates,
             get_spot_eviction_history,
             get_spot_price_history,
+            v1_status,
+            v1_list_locations,
+            v1_list_skus,
+            v1_retail_prices,
+            v1_eviction_rates,
+            v1_eviction_rates_latest,
         ]
 
     def get_static_dir(self) -> Path | None:

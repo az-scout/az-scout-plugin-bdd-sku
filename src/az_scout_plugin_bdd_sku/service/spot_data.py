@@ -11,8 +11,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import requests
-from azure.identity import DefaultAzureCredential
-
 from az_scout_plugin_bdd_sku.config import get_config
 from az_scout_plugin_bdd_sku.db import (
     create_ingest_run,
@@ -25,6 +23,8 @@ from az_scout_plugin_bdd_sku.db import (
 )
 from az_scout_plugin_bdd_sku.models import WarmResult
 from az_scout_plugin_bdd_sku.service.locks import compute_lock_key
+from azure.identity import DefaultAzureCredential
+
 from az_scout_plugin_bdd_sku.service.retail_pricing import DEFAULT_SKU_SAMPLE
 
 logger = logging.getLogger(__name__)

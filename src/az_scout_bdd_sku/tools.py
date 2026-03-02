@@ -264,3 +264,171 @@ async def _spot_eviction_history_async() -> dict[str, Any]:
             }
     except Exception:
         return {"count": 0, "snapshots": [], "error": "Query failed"}
+
+
+# ==================================================================
+# V1 MCP tools — thin wrappers over db_api
+# ==================================================================
+
+
+def v1_status() -> dict[str, Any]:
+    """Return v1 database status: health, row counts, last job per dataset."""
+    return asyncio.run(_v1_status_async())
+
+
+async def _v1_status_async() -> dict[str, Any]:
+    from az_scout_bdd_sku.db_api import get_status
+
+    return await get_status()
+
+
+def v1_list_locations(
+    limit: int = 1000,
+    cursor: str = "",
+) -> dict[str, Any]:
+    """List distinct Azure location names across all tables. Paginated (keyset cursor)."""
+    return asyncio.run(_v1_list_locations_async(limit, cursor))
+
+
+async def _v1_list_locations_async(limit: int, cursor: str) -> dict[str, Any]:
+    from az_scout_bdd_sku.db_api import list_locations
+    from az_scout_bdd_sku.pagination import build_page, decode_cursor
+
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    items = await list_locations(limit, cursor_payload)
+    trimmed, page = build_page(
+        items,
+        limit,
+        cursor_builder=lambda it: {"name": it["name"]},
+    )
+    return {"items": trimmed, "page": page}
+
+
+def v1_list_skus(
+    search: str = "",
+    limit: int = 1000,
+    cursor: str = "",
+) -> dict[str, Any]:
+    """List distinct VM SKU names. Optional substring search. Paginated."""
+    return asyncio.run(_v1_list_skus_async(search, limit, cursor))
+
+
+async def _v1_list_skus_async(search: str, limit: int, cursor: str) -> dict[str, Any]:
+    from az_scout_bdd_sku.db_api import list_skus
+    from az_scout_bdd_sku.pagination import build_page, decode_cursor
+
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    items = await list_skus(limit, cursor_payload, search=search or None)
+    trimmed, page = build_page(
+        items,
+        limit,
+        cursor_builder=lambda it: {"skuName": it["skuName"]},
+    )
+    return {"items": trimmed, "page": page}
+
+
+def v1_retail_prices(
+    region: str = "",
+    sku: str = "",
+    currency: str = "",
+    limit: int = 1000,
+    cursor: str = "",
+) -> dict[str, Any]:
+    """Query retail VM prices with filters. Paginated (keyset cursor)."""
+    return asyncio.run(_v1_retail_prices_async(region, sku, currency, limit, cursor))
+
+
+async def _v1_retail_prices_async(
+    region: str,
+    sku: str,
+    currency: str,
+    limit: int,
+    cursor: str,
+) -> dict[str, Any]:
+    from az_scout_bdd_sku.db_api import list_retail_prices
+    from az_scout_bdd_sku.pagination import build_page, decode_cursor
+
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    items = await list_retail_prices(
+        limit,
+        cursor_payload,
+        region=region or None,
+        sku=sku or None,
+        currency=currency or None,
+    )
+
+    def _cb(it: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "currencyCode": it["currencyCode"],
+            "armRegionName": it["armRegionName"],
+            "armSkuName": it["armSkuName"],
+            "skuId": it["skuId"],
+            "pricingType": it["pricingType"],
+            "reservationTerm": it["reservationTerm"],
+        }
+
+    trimmed, page = build_page(items, limit, cursor_builder=_cb)
+    return {"items": trimmed, "page": page}
+
+
+def v1_eviction_rates(
+    region: str = "",
+    sku: str = "",
+    limit: int = 1000,
+    cursor: str = "",
+) -> dict[str, Any]:
+    """Query spot eviction rates with filters. Paginated (keyset cursor)."""
+    return asyncio.run(_v1_eviction_rates_async(region, sku, limit, cursor))
+
+
+async def _v1_eviction_rates_async(
+    region: str,
+    sku: str,
+    limit: int,
+    cursor: str,
+) -> dict[str, Any]:
+    from az_scout_bdd_sku.db_api import list_eviction_rates
+    from az_scout_bdd_sku.pagination import build_page, decode_cursor
+
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    items = await list_eviction_rates(
+        limit,
+        cursor_payload,
+        region=region or None,
+        sku=sku or None,
+    )
+
+    def _cb(it: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "jobDatetimeUtc": it["jobDatetimeUtc"],
+            "region": it["region"],
+            "skuName": it["skuName"],
+            "jobId": it["jobId"],
+        }
+
+    trimmed, page = build_page(items, limit, cursor_builder=_cb)
+    return {"items": trimmed, "page": page}
+
+
+def v1_eviction_rates_latest(
+    region: str = "",
+    sku: str = "",
+    limit: int = 200,
+) -> dict[str, Any]:
+    """Latest eviction rate per (region, sku_name). Not paginated."""
+    return asyncio.run(_v1_eviction_rates_latest_async(region, sku, limit))
+
+
+async def _v1_eviction_rates_latest_async(
+    region: str,
+    sku: str,
+    limit: int,
+) -> dict[str, Any]:
+    from az_scout_bdd_sku.db_api import list_eviction_rates_latest
+
+    items = await list_eviction_rates_latest(
+        limit,
+        region=region or None,
+        sku=sku or None,
+    )
+    return {"items": items}

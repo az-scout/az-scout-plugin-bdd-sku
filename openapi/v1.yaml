@@ -1,0 +1,724 @@
+openapi: "3.0.3"
+info:
+  title: az-scout-plugin-bdd-sku API
+  description: |
+    Read-only REST API for querying Azure VM retail prices, spot prices
+    and eviction rates cached in PostgreSQL.
+    Exposes keyset (cursor-based) pagination for efficient traversal of
+    large datasets (millions of rows).
+  version: "1.0.0"
+  license:
+    name: MIT
+
+servers:
+  - url: /plugins/bdd-sku
+    description: Mounted by az-scout
+
+tags:
+  - name: Status
+  - name: Reference Data
+  - name: Retail Prices
+  - name: Spot Prices
+  - name: Eviction Rates
+
+# ====================================================================
+# Paths
+# ====================================================================
+paths:
+  /v1/status:
+    get:
+      operationId: getStatus
+      summary: Database health and dataset statistics
+      tags: [Status]
+      responses:
+        "200":
+          description: Status payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/locations:
+    get:
+      operationId: listLocations
+      summary: Distinct Azure location names
+      tags: [Reference Data]
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of location names
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/skus:
+    get:
+      operationId: listSkus
+      summary: Distinct VM SKU names
+      tags: [Reference Data]
+      parameters:
+        - $ref: "#/components/parameters/search"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of SKU names
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkuListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/currencies:
+    get:
+      operationId: listCurrencies
+      summary: Distinct currency codes
+      tags: [Reference Data]
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of currency codes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrencyListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/os-types:
+    get:
+      operationId: listOsTypes
+      summary: Distinct OS types
+      tags: [Reference Data]
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated list of OS types
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OsTypeListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/retail/prices:
+    get:
+      operationId: listRetailPrices
+      summary: Retail VM prices with optional filters
+      tags: [Retail Prices]
+      parameters:
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/sku"
+        - $ref: "#/components/parameters/currency"
+        - $ref: "#/components/parameters/effectiveAt"
+        - $ref: "#/components/parameters/updatedSince"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated retail prices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetailPriceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/retail/prices/latest:
+    get:
+      operationId: listRetailPricesLatest
+      summary: Latest retail price per unique key
+      tags: [Retail Prices]
+      parameters:
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/sku"
+        - $ref: "#/components/parameters/currency"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated latest retail prices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetailPriceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/spot/prices:
+    get:
+      operationId: listSpotPrices
+      summary: Spot price history
+      tags: [Spot Prices]
+      parameters:
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/sku"
+        - $ref: "#/components/parameters/osType"
+        - $ref: "#/components/parameters/sample"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated spot price history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpotPriceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /v1/spot/eviction-rates:
+    get:
+      operationId: listEvictionRates
+      summary: Spot eviction rates
+      tags: [Eviction Rates]
+      parameters:
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/sku"
+        - $ref: "#/components/parameters/updatedSince"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+      responses:
+        "200":
+          description: Paginated eviction rates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvictionRateListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/spot/eviction-rates/series:
+    get:
+      operationId: getEvictionRateSeries
+      summary: Time-bucketed eviction rate aggregation
+      tags: [Eviction Rates]
+      parameters:
+        - name: region
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: sku
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/bucket"
+        - $ref: "#/components/parameters/agg"
+      responses:
+        "200":
+          description: Time-bucketed series
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvictionSeriesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/spot/eviction-rates/latest:
+    get:
+      operationId: listEvictionRatesLatest
+      summary: Latest eviction rate per (region, sku)
+      tags: [Eviction Rates]
+      parameters:
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/sku"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: Latest eviction rates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvictionRateListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+# ====================================================================
+# Components
+# ====================================================================
+components:
+  # ------------------------------------------------------------------
+  # Parameters
+  # ------------------------------------------------------------------
+  parameters:
+    limit:
+      name: limit
+      in: query
+      description: "Page size (1–5000, default 1000)"
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 5000
+        default: 1000
+
+    cursor:
+      name: cursor
+      in: query
+      description: Opaque keyset pagination cursor
+      schema:
+        type: string
+
+    region:
+      name: region
+      in: query
+      description: Filter by Azure region name
+      schema:
+        type: string
+
+    sku:
+      name: sku
+      in: query
+      description: Filter by ARM SKU name
+      schema:
+        type: string
+
+    currency:
+      name: currency
+      in: query
+      description: Filter by currency code (e.g. USD, EUR)
+      schema:
+        type: string
+
+    search:
+      name: search
+      in: query
+      description: Case-insensitive substring search
+      schema:
+        type: string
+
+    effectiveAt:
+      name: effectiveAt
+      in: query
+      description: "ISO datetime — effective_start_date <= value"
+      schema:
+        type: string
+        format: date-time
+
+    updatedSince:
+      name: updatedSince
+      in: query
+      description: "ISO datetime — job_datetime >= value"
+      schema:
+        type: string
+        format: date-time
+
+    osType:
+      name: osType
+      in: query
+      description: Filter by OS type (Linux, Windows)
+      schema:
+        type: string
+
+    sample:
+      name: sample
+      in: query
+      description: "Sampling mode: raw (default), hourly, daily"
+      schema:
+        type: string
+        enum: [raw, hourly, daily]
+        default: raw
+
+    bucket:
+      name: bucket
+      in: query
+      required: true
+      description: "Time bucket: hour, day, week"
+      schema:
+        type: string
+        enum: [hour, day, week]
+
+    agg:
+      name: agg
+      in: query
+      description: "Aggregation function: avg (default), min, max"
+      schema:
+        type: string
+        enum: [avg, min, max]
+        default: avg
+
+  # ------------------------------------------------------------------
+  # Schemas
+  # ------------------------------------------------------------------
+  schemas:
+    Meta:
+      type: object
+      properties:
+        dataSource:
+          type: string
+          example: local-db
+        generatedAt:
+          type: string
+          format: date-time
+      required: [dataSource, generatedAt]
+
+    Page:
+      type: object
+      properties:
+        limit:
+          type: integer
+        cursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+      required: [limit, cursor, hasMore]
+
+    ErrorBody:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [BAD_REQUEST, INTERNAL, NOT_IMPLEMENTED]
+        message:
+          type: string
+        details:
+          type: object
+      required: [code, message]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+        meta:
+          $ref: "#/components/schemas/Meta"
+      required: [error, meta]
+
+    # Status
+    DatasetStats:
+      type: object
+      properties:
+        rowCount:
+          type: integer
+        lastJobDatetimeUtc:
+          type: string
+          format: date-time
+          nullable: true
+        lastJobId:
+          type: string
+          nullable: true
+
+    StatusResponse:
+      type: object
+      properties:
+        dbConnected:
+          type: boolean
+        datasets:
+          type: object
+          properties:
+            retail:
+              $ref: "#/components/schemas/DatasetStats"
+            spotPrices:
+              $ref: "#/components/schemas/DatasetStats"
+            evictionRates:
+              $ref: "#/components/schemas/DatasetStats"
+        version:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    # Items
+    LocationItem:
+      type: object
+      properties:
+        name:
+          type: string
+      required: [name]
+
+    SkuItem:
+      type: object
+      properties:
+        skuName:
+          type: string
+      required: [skuName]
+
+    CurrencyItem:
+      type: object
+      properties:
+        currencyCode:
+          type: string
+      required: [currencyCode]
+
+    OsTypeItem:
+      type: object
+      properties:
+        osType:
+          type: string
+      required: [osType]
+
+    RetailPriceItem:
+      type: object
+      properties:
+        currencyCode:
+          type: string
+        armRegionName:
+          type: string
+        armSkuName:
+          type: string
+        skuId:
+          type: string
+        pricingType:
+          type: string
+        reservationTerm:
+          type: string
+          nullable: true
+        retailPrice:
+          type: number
+          nullable: true
+        unitPrice:
+          type: number
+          nullable: true
+        unitOfMeasure:
+          type: string
+        effectiveStartDate:
+          type: string
+          format: date-time
+          nullable: true
+        jobId:
+          type: string
+          nullable: true
+        jobDatetime:
+          type: string
+          format: date-time
+          nullable: true
+
+    SpotPriceItem:
+      type: object
+      properties:
+        region:
+          type: string
+        skuName:
+          type: string
+        osType:
+          type: string
+        jobId:
+          type: string
+          nullable: true
+        jobDatetime:
+          type: string
+          format: date-time
+          nullable: true
+        priceHistory:
+          type: object
+          description: Raw JSONB price history
+
+    EvictionRateItem:
+      type: object
+      properties:
+        region:
+          type: string
+        skuName:
+          type: string
+        jobId:
+          type: string
+        jobDatetimeUtc:
+          type: string
+          format: date-time
+        evictionRate:
+          type: number
+          nullable: true
+          description: Numeric eviction rate (null if non-numeric)
+        evictionRateRaw:
+          type: string
+          description: Raw eviction rate string from Azure
+
+    EvictionSeriesPoint:
+      type: object
+      properties:
+        bucketTs:
+          type: string
+          format: date-time
+        value:
+          type: number
+          nullable: true
+        points:
+          type: integer
+
+    # List responses
+    LocationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocationItem"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    SkuListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkuItem"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    CurrencyListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurrencyItem"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    OsTypeListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OsTypeItem"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    RetailPriceListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RetailPriceItem"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    SpotPriceListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpotPriceItem"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EvictionRateListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvictionRateItem"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    EvictionSeriesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvictionSeriesPoint"
+        page:
+          $ref: "#/components/schemas/Page"
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/Meta"
+            - type: object
+              properties:
+                bucket:
+                  type: string
+                agg:
+                  type: string
+
+  # ------------------------------------------------------------------
+  # Responses
+  # ------------------------------------------------------------------
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: BAD_REQUEST
+              message: "limit must be between 1 and 5000, got 10000"
+            meta:
+              dataSource: local-db
+              generatedAt: "2026-03-02T12:00:00+00:00"
+
+    InternalError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL
+              message: Query failed
+            meta:
+              dataSource: local-db
+              generatedAt: "2026-03-02T12:00:00+00:00"
+
+    NotImplemented:
+      description: Feature not yet available
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: NOT_IMPLEMENTED
+              message: "sample='hourly' is not implemented yet, use sample=raw"
+            meta:
+              dataSource: local-db
+              generatedAt: "2026-03-02T12:00:00+00:00"

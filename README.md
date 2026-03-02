@@ -195,6 +195,99 @@ Le plugin expose 4 outils sur le serveur MCP d'az-scout, utilisables par les LLM
 | `get_spot_eviction_rates` | `region?`, `sku_name?`, `job_id?` | Taux d'éviction Spot. Sans `job_id` → dernier snapshot |
 | `get_spot_eviction_history` | *(aucun)* | Liste les snapshots d'éviction disponibles (50 derniers) |
 | `get_spot_price_history` | `region?`, `sku_name?`, `os_type?` | Historique des prix Spot par SKU×région×OS |
+| `v1_status` | *(aucun)* | Statut v1 : santé DB, stats par dataset |
+| `v1_list_locations` | `limit?`, `cursor?` | Lister les régions Azure (paginé) |
+| `v1_list_skus` | `search?`, `limit?`, `cursor?` | Lister les SKUs VM (paginé) |
+| `v1_retail_prices` | `region?`, `sku?`, `currency?`, `limit?`, `cursor?` | Prix retail VM (paginé) |
+| `v1_eviction_rates` | `region?`, `sku?`, `limit?`, `cursor?` | Taux d'éviction Spot (paginé) |
+| `v1_eviction_rates_latest` | `region?`, `sku?`, `limit?` | Dernier taux d'éviction par (region, sku) |
+
+---
+
+## API v1 — Read-only (cursor-paginated)
+
+L'API v1 est montée sous `/plugins/bdd-sku/v1/` et offre un accès en lecture seule
+aux données PostgreSQL via une pagination par curseur (keyset) haute performance.
+
+**Base path :** `/plugins/bdd-sku/v1`
+
+### Pagination
+
+Tous les endpoints paginés utilisent la **pagination keyset** :
+- `limit` : nombre d'items par page (1–5000, défaut 1000)
+- `cursor` : token opaque (base64url) renvoyé dans la réponse `page.cursor`
+- `page.hasMore` : `true` si une page suivante existe
+
+Pour parcourir toutes les pages :
+```bash
+# Page 1
+curl ".../v1/locations?limit=100"
+# → page.cursor = "eyJuYW1lIjoi..."
+# Page 2
+curl ".../v1/locations?limit=100&cursor=eyJuYW1lIjoi..."
+```
+
+### Contrat JSON
+
+Toute réponse 2xx suit la structure `ListResponse<T>` :
+
+```json
+{
+  "items": [...],
+  "page": { "limit": 1000, "cursor": "...", "hasMore": true },
+  "meta": { "dataSource": "local-db", "generatedAt": "2026-03-02T..." }
+}
+```
+
+Les erreurs suivent `ErrorResponse` :
+
+```json
+{
+  "error": { "code": "BAD_REQUEST", "message": "..." },
+  "meta": { "dataSource": "local-db", "generatedAt": "..." }
+}
+```
+
+### Endpoints v1
+
+| # | Endpoint | Méthode | Paginé | Description |
+|---|---|---|---|---|
+| 1 | `/v1/status` | GET | Non | Santé DB, stats par dataset, version API |
+| 2 | `/v1/locations` | GET | Oui | Noms de régions distincts (union 3 tables) |
+| 3 | `/v1/skus` | GET | Oui | Noms de SKUs distincts (filtre `search` ILIKE) |
+| 4 | `/v1/currencies` | GET | Oui | Codes devise distincts (retail) |
+| 5 | `/v1/os-types` | GET | Oui | Types OS distincts (spot) |
+| 6 | `/v1/retail/prices` | GET | Oui | Prix retail avec filtres (region, sku, currency, effectiveAt, updatedSince) |
+| 7 | `/v1/retail/prices/latest` | GET | Oui | Dernier snapshot retail par clé unique |
+| 8 | `/v1/spot/prices` | GET | Oui | Historique prix Spot (sample=raw uniquement, sinon 501) |
+| 9 | `/v1/spot/eviction-rates` | GET | Oui | Taux d'éviction Spot (filtres region, sku, updatedSince) |
+| 10 | `/v1/spot/eviction-rates/series` | GET | Non | Série temporelle agrégée (bucket=hour\|day\|week, agg=avg\|min\|max) |
+| 11 | `/v1/spot/eviction-rates/latest` | GET | Non | Dernier taux par (region, sku) |
+
+### Exemples curl
+
+```bash
+# Status
+curl "http://localhost:5001/plugins/bdd-sku/v1/status"
+
+# Prix retail (100 premiers en USD, region eastus)
+curl "http://localhost:5001/plugins/bdd-sku/v1/retail/prices?region=eastus&currency=USD&limit=100"
+
+# Taux d'éviction mis à jour depuis 24h
+curl "http://localhost:5001/plugins/bdd-sku/v1/spot/eviction-rates?updatedSince=2026-03-01T00:00:00Z&limit=500"
+
+# Série éviction horaire pour un SKU
+curl "http://localhost:5001/plugins/bdd-sku/v1/spot/eviction-rates/series?region=eastus&sku=Standard_D2s_v3&bucket=hour"
+
+# Prix Spot (raw)
+curl "http://localhost:5001/plugins/bdd-sku/v1/spot/prices?region=westeurope&sku=Standard_D4s_v3"
+```
+
+> **Note :** `spot/prices` renvoie `price_history` tel quel (JSONB). Les paramètres `from`/`to` filtrent sur `job_datetime` (snapshot). Le mode `sample=hourly|daily` n'est pas encore implémenté (renvoie 501).
+
+### Spécification OpenAPI
+
+La spécification complète se trouve dans [`openapi/v1.yaml`](openapi/v1.yaml) (OpenAPI 3.0.3).
 
 ---
 
