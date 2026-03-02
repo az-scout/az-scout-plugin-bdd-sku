@@ -111,7 +111,8 @@ class AzurePricingCollector(BaseCollector):
 
     def build_filter_params(self) -> dict[str, str]:
         """Convert AZURE_PRICING_FILTERS JSON into OData $filter query param."""
-        params: dict[str, str] = {}
+        # Preview API version required for savingsPlan field in responses
+        params: dict[str, str] = {"api-version": "2023-01-01-preview"}
 
         if not self.filters_json or self.filters_json == "{}":
             return params
