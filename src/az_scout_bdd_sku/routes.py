@@ -23,13 +23,16 @@ logger = logging.getLogger(__name__)
 
 @router.get("/status")
 async def status() -> dict[str, Any]:
-    """Cache status: database health, row count and last ingestion run."""
+    """Cache status: database health, row counts, regions, SKUs, and last runs."""
     db_ok = await is_healthy()
 
     count: int = -1
     eviction_count: int = -1
     price_count: int = -1
+    regions_count: int = 0
+    spot_skus_count: int = 0
     last_run: dict[str, Any] | None = None
+    last_run_spot: dict[str, Any] | None = None
 
     if db_ok:
         try:
@@ -59,6 +62,21 @@ async def status() -> dict[str, Any]:
         try:
             async with get_conn() as conn:
                 cur = await conn.execute(
+                    "SELECT COUNT(DISTINCT region), COUNT(DISTINCT sku_name) "
+                    "FROM spot_eviction_rates "
+                    "WHERE job_datetime = "
+                    "(SELECT MAX(job_datetime) FROM spot_eviction_rates)"
+                )
+                row = await cur.fetchone()
+                if row:
+                    regions_count = row[0] or 0
+                    spot_skus_count = row[1] or 0
+        except Exception:
+            pass
+
+        try:
+            async with get_conn() as conn:
+                cur = await conn.execute(
                     """
                     SELECT run_id, status, started_at_utc, finished_at_utc,
                            items_read, items_written, error_message
@@ -80,12 +98,39 @@ async def status() -> dict[str, Any]:
         except Exception:
             last_run = None
 
+        try:
+            async with get_conn() as conn:
+                cur = await conn.execute(
+                    """
+                    SELECT run_id, status, started_at_utc, finished_at_utc,
+                           items_read, items_written, error_message
+                    FROM job_runs WHERE dataset = 'azure_spot'
+                    ORDER BY started_at_utc DESC LIMIT 1
+                    """
+                )
+                lr = await cur.fetchone()
+                if lr:
+                    last_run_spot = {
+                        "run_id": str(lr[0]),
+                        "status": lr[1],
+                        "started_at_utc": lr[2].isoformat() if lr[2] else None,
+                        "finished_at_utc": lr[3].isoformat() if lr[3] else None,
+                        "items_read": lr[4] or 0,
+                        "items_written": lr[5] or 0,
+                        "error_message": lr[6],
+                    }
+        except Exception:
+            last_run_spot = None
+
     return {
         "db_connected": db_ok,
         "retail_prices_count": count,
         "spot_eviction_rates_count": eviction_count,
         "spot_price_history_count": price_count,
+        "regions_count": regions_count,
+        "spot_skus_count": spot_skus_count,
         "last_run": last_run,
+        "last_run_spot": last_run_spot,
     }
 
 

@@ -1,5 +1,40 @@
 /* SKU DB Cache plugin styles */
 
+/* KPI row */
+.bdd-sku-kpis {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.bdd-sku-kpi {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 100px;
+    padding: 0.75rem 1.25rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.5rem;
+    background: var(--bs-body-bg);
+}
+
+.bdd-sku-kpi-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--bs-emphasis-color);
+}
+
+.bdd-sku-kpi-label {
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 0.2rem;
+}
+
+/* Cards grid */
 .bdd-sku-cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -12,6 +47,18 @@
     border-radius: 0.5rem;
     padding: 1rem 1.25rem;
     background: var(--bs-body-bg);
+}
+
+.bdd-sku-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.bdd-sku-card-header h6 {
+    margin: 0;
+    font-weight: 600;
 }
 
 .bdd-sku-card h6 {

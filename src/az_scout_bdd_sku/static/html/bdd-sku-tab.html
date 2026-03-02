@@ -1,16 +1,53 @@
-<!-- SKU DB Cache – status card -->
+<!-- SKU DB Cache – dashboard -->
 <div>
     <h6><i class="bi bi-database"></i> SKU DB Cache</h6>
     <p class="text-body-secondary small mb-3">
-        Cached VM retail pricing data from the Azure Retail Prices API.
+        Cached Azure VM pricing and Spot data from Azure APIs.
     </p>
 
-    <!-- Status card -->
+    <!-- KPI row -->
+    <div class="bdd-sku-kpis" id="bdd-sku-kpis">
+        <div class="bdd-sku-kpi">
+            <span class="bdd-sku-kpi-value" id="bdd-sku-kpi-regions">--</span>
+            <span class="bdd-sku-kpi-label">Regions</span>
+        </div>
+        <div class="bdd-sku-kpi">
+            <span class="bdd-sku-kpi-value" id="bdd-sku-kpi-retail">--</span>
+            <span class="bdd-sku-kpi-label">Retail prices</span>
+        </div>
+        <div class="bdd-sku-kpi">
+            <span class="bdd-sku-kpi-value" id="bdd-sku-kpi-spot-skus">--</span>
+            <span class="bdd-sku-kpi-label">Spot SKUs</span>
+        </div>
+    </div>
+
+    <!-- Cards -->
     <div class="bdd-sku-cards" id="bdd-sku-cards">
+        <!-- Retail Pricing -->
         <div class="bdd-sku-card" id="bdd-sku-card-retail">
-            <h6><i class="bi bi-currency-dollar"></i> Retail Pricing</h6>
-            <span class="bdd-sku-badge bdd-sku-badge--idle" id="bdd-sku-badge-retail">Loading…</span>
+            <div class="bdd-sku-card-header">
+                <h6><i class="bi bi-currency-dollar"></i> Retail Pricing</h6>
+                <span class="bdd-sku-badge bdd-sku-badge--idle" id="bdd-sku-badge-retail">Loading…</span>
+            </div>
             <dl class="bdd-sku-meta" id="bdd-sku-meta-retail"></dl>
+        </div>
+
+        <!-- Spot Eviction Rates -->
+        <div class="bdd-sku-card" id="bdd-sku-card-eviction">
+            <div class="bdd-sku-card-header">
+                <h6><i class="bi bi-exclamation-triangle"></i> Spot Eviction Rates</h6>
+                <span class="bdd-sku-badge bdd-sku-badge--idle" id="bdd-sku-badge-eviction">Loading…</span>
+            </div>
+            <dl class="bdd-sku-meta" id="bdd-sku-meta-eviction"></dl>
+        </div>
+
+        <!-- Spot Price History -->
+        <div class="bdd-sku-card" id="bdd-sku-card-spot-price">
+            <div class="bdd-sku-card-header">
+                <h6><i class="bi bi-graph-up"></i> Spot Price History</h6>
+                <span class="bdd-sku-badge bdd-sku-badge--idle" id="bdd-sku-badge-spot-price">Loading…</span>
+            </div>
+            <dl class="bdd-sku-meta" id="bdd-sku-meta-spot-price"></dl>
         </div>
     </div>
 
