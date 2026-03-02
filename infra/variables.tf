@@ -84,9 +84,15 @@ variable "max_spot_items" {
 }
 
 variable "cron_expression" {
-  description = "Cron expression for the scheduled ingestion job (UTC)"
+  description = "Cron expression for the main scheduled ingestion job (UTC)"
   type        = string
   default     = "0 2 * * *" # Daily at 02:00 UTC
+}
+
+variable "spot_eviction_cron" {
+  description = "Cron expression for the hourly spot eviction historization job (UTC)"
+  type        = string
+  default     = "0 * * * *" # Every hour
 }
 
 variable "log_level" {

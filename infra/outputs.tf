@@ -28,6 +28,11 @@ output "ingestion_manual_job_name" {
   value       = azurerm_container_app_job.ingestion_manual.name
 }
 
+output "spot_eviction_hourly_job_name" {
+  description = "Name of the hourly spot eviction historization job"
+  value       = azurerm_container_app_job.spot_eviction_hourly.name
+}
+
 output "managed_identity_client_id" {
   description = "Client ID of the managed identity for jobs"
   value       = azurerm_user_assigned_identity.ingestion_jobs.client_id

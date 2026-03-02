@@ -98,9 +98,13 @@ async def status() -> dict[str, Any]:
 async def spot_eviction_rates(
     region: str | None = Query(None, description="Filter by region"),
     sku_name: str | None = Query(None, description="Substring match on SKU name"),
+    job_id: str | None = Query(None, description="Filter by specific job_id snapshot"),
     limit: int = Query(200, ge=1, le=5000, description="Max rows to return"),
 ) -> dict[str, Any]:
-    """Return cached spot eviction rates with optional filters."""
+    """Return cached spot eviction rates with optional filters.
+
+    Without ``job_id``, returns the latest snapshot (most recent job_datetime).
+    """
     clauses: list[str] = []
     params: dict[str, Any] = {}
 
@@ -110,6 +114,16 @@ async def spot_eviction_rates(
     if sku_name:
         clauses.append("sku_name ILIKE %(sku_name)s")
         params["sku_name"] = f"%{sku_name}%"
+    if job_id:
+        clauses.append("job_id = %(job_id)s")
+        params["job_id"] = job_id
+    else:
+        # Default: latest snapshot only
+        clauses.append(
+            "job_datetime = ("
+            "SELECT MAX(job_datetime) FROM spot_eviction_rates"
+            ")"
+        )
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     params["limit"] = limit
@@ -117,7 +131,7 @@ async def spot_eviction_rates(
     try:
         async with get_conn() as conn:
             cur = await conn.execute(
-                f"SELECT sku_name, region, eviction_rate "
+                f"SELECT sku_name, region, eviction_rate, job_id, job_datetime "
                 f"FROM spot_eviction_rates{where} "
                 f"ORDER BY sku_name LIMIT %(limit)s",
                 params,
@@ -130,6 +144,8 @@ async def spot_eviction_rates(
                         "sku_name": r[0],
                         "region": r[1],
                         "eviction_rate": r[2],
+                        "job_id": r[3],
+                        "job_datetime": r[4].isoformat() if r[4] else None,
                     }
                     for r in rows
                 ],
@@ -137,6 +153,43 @@ async def spot_eviction_rates(
     except Exception:
         logger.exception("Error querying spot eviction rates")
         return {"count": 0, "items": [], "error": "Query failed"}
+
+
+# ------------------------------------------------------------------
+# Spot eviction rates history (list available snapshots)
+# ------------------------------------------------------------------
+
+
+@router.get("/spot/eviction-rates/history")
+async def spot_eviction_history(
+    limit: int = Query(50, ge=1, le=500, description="Max snapshots to return"),
+) -> dict[str, Any]:
+    """List available eviction rate snapshots (job_id + job_datetime + row count)."""
+    try:
+        async with get_conn() as conn:
+            cur = await conn.execute(
+                "SELECT job_id, job_datetime, COUNT(*) AS cnt "
+                "FROM spot_eviction_rates "
+                "GROUP BY job_id, job_datetime "
+                "ORDER BY job_datetime DESC "
+                "LIMIT %(limit)s",
+                {"limit": limit},
+            )
+            rows = await cur.fetchall()
+            return {
+                "count": len(rows),
+                "snapshots": [
+                    {
+                        "job_id": r[0],
+                        "job_datetime": r[1].isoformat() if r[1] else None,
+                        "row_count": r[2],
+                    }
+                    for r in rows
+                ],
+            }
+    except Exception:
+        logger.exception("Error querying eviction rate history")
+        return {"count": 0, "snapshots": [], "error": "Query failed"}
 
 
 # ------------------------------------------------------------------

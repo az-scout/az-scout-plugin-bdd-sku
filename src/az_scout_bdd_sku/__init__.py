@@ -36,11 +36,17 @@ class BddSkuPlugin:
     def get_mcp_tools(self) -> list[Callable[..., Any]] | None:
         from az_scout_bdd_sku.tools import (
             cache_status,
+            get_spot_eviction_history,
             get_spot_eviction_rates,
             get_spot_price_history,
         )
 
-        return [cache_status, get_spot_eviction_rates, get_spot_price_history]
+        return [
+            cache_status,
+            get_spot_eviction_rates,
+            get_spot_eviction_history,
+            get_spot_price_history,
+        ]
 
     def get_static_dir(self) -> Path | None:
         return _STATIC_DIR

@@ -63,11 +63,17 @@ class AzureSpotCollector(BaseCollector):
         # Page delay to respect Resource Graph rate limits (15 req / 5s / tenant)
         self.page_delay = 0.5
 
+        # Eviction-only mode: skip price history query (for hourly historization)
+        self.eviction_only = str(config.get("eviction_only", "false")).lower() in (
+            "true", "1", "yes",
+        )
+
         self.logger.info(
-            "AzureSpotCollector init – max_items=%s, retry=%d/%.1fs",
+            "AzureSpotCollector init – max_items=%s, retry=%d/%.1fs, eviction_only=%s",
             "unlimited" if self.max_items == float("inf") else int(self.max_items),
             self.api_retry_attempts,
             self.api_retry_delay,
+            self.eviction_only,
         )
 
     # ------------------------------------------------------------------
@@ -87,12 +93,12 @@ class AzureSpotCollector(BaseCollector):
     def table_schema(self) -> str:
         return """
             CREATE TABLE IF NOT EXISTS spot_eviction_rates (
-                job_id       TEXT,
-                job_datetime TIMESTAMPTZ,
+                job_id       TEXT NOT NULL,
+                job_datetime TIMESTAMPTZ NOT NULL,
                 sku_name     TEXT NOT NULL,
                 region       TEXT NOT NULL,
                 eviction_rate TEXT NOT NULL,
-                UNIQUE (sku_name, region)
+                UNIQUE (sku_name, region, job_id)
             );
             CREATE TABLE IF NOT EXISTS spot_price_history (
                 job_id        TEXT,
@@ -254,11 +260,7 @@ class AzureSpotCollector(BaseCollector):
                             VALUES
                                 (%(job_id)s, %(job_datetime)s, %(sku_name)s,
                                  %(region)s, %(eviction_rate)s)
-                            ON CONFLICT (sku_name, region)
-                            DO UPDATE SET
-                                job_id        = EXCLUDED.job_id,
-                                job_datetime  = EXCLUDED.job_datetime,
-                                eviction_rate = EXCLUDED.eviction_rate
+                            ON CONFLICT (sku_name, region, job_id) DO NOTHING
                             """,
                             {
                                 "job_id": self.job_id,
@@ -402,23 +404,27 @@ class AzureSpotCollector(BaseCollector):
 
         self.logger.info("Eviction rates ingested: %d rows", len(eviction_rows))
 
-        # --- price history ---
-        self.logger.info("Querying spot price history …")
-        price_rows = self._resource_graph_query(
-            session, headers, _PRICE_HISTORY_QUERY
-        )
-        self.logger.info("Received %d price history rows", len(price_rows))
+        # --- price history (skipped in eviction-only mode) ---
+        if self.eviction_only:
+            self.logger.info("Eviction-only mode – skipping price history query")
+            price_rows = []
+        else:
+            self.logger.info("Querying spot price history …")
+            price_rows = self._resource_graph_query(
+                session, headers, _PRICE_HISTORY_QUERY
+            )
+            self.logger.info("Received %d price history rows", len(price_rows))
 
-        for i in range(0, len(price_rows), batch_size):
-            batch = price_rows[i : i + batch_size]
-            batch_id = f"price-{i // batch_size + 1}"
-            ok = self._ingest_price_history_batch(pg_conn, batch, batch_id)
-            if ok:
-                total_ingested += len(batch)
-            else:
-                raise Exception(f"Failed to ingest {batch_id} ({len(batch)} items)")
+            for i in range(0, len(price_rows), batch_size):
+                batch = price_rows[i : i + batch_size]
+                batch_id = f"price-{i // batch_size + 1}"
+                ok = self._ingest_price_history_batch(pg_conn, batch, batch_id)
+                if ok:
+                    total_ingested += len(batch)
+                else:
+                    raise Exception(f"Failed to ingest {batch_id} ({len(batch)} items)")
 
-        self.logger.info("Price history ingested: %d rows", len(price_rows))
+            self.logger.info("Price history ingested: %d rows", len(price_rows))
 
         self.total_collected = len(eviction_rows) + len(price_rows)
         self.total_ingested = total_ingested

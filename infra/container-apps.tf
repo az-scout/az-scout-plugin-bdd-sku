@@ -219,6 +219,125 @@ resource "azurerm_container_app_job" "ingestion_scheduled" {
 }
 
 # ---------------------------------------------------------------------
+# Container Apps Job – Spot Eviction Hourly (historization)
+# ---------------------------------------------------------------------
+resource "azurerm_container_app_job" "spot_eviction_hourly" {
+  name                         = "${var.prefix}-spot-evict"
+  location                     = azurerm_resource_group.main.location
+  resource_group_name          = azurerm_resource_group.main.name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.ingestion_jobs.id]
+  }
+
+  replica_timeout_in_seconds = 900
+  replica_retry_limit        = 3
+
+  schedule_trigger_config {
+    cron_expression          = var.spot_eviction_cron
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  template {
+    container {
+      name   = "bdd-sku-spot-eviction"
+      image  = "${azurerm_container_registry.main.login_server}/bdd-sku-ingestion:latest"
+      cpu    = 0.5
+      memory = "1Gi"
+
+      env {
+        name  = "POSTGRES_HOST"
+        value = azurerm_postgresql_flexible_server.main.fqdn
+      }
+
+      env {
+        name  = "POSTGRES_PORT"
+        value = "5432"
+      }
+
+      env {
+        name  = "POSTGRES_DB"
+        value = var.postgres_db_name
+      }
+
+      env {
+        name  = "POSTGRES_USER"
+        value = var.postgres_admin_user
+      }
+
+      env {
+        name        = "POSTGRES_PASSWORD"
+        secret_name = "pg-password"
+      }
+
+      env {
+        name  = "POSTGRES_SSLMODE"
+        value = "require"
+      }
+
+      env {
+        name  = "ENABLE_AZURE_PRICING_COLLECTOR"
+        value = "false"
+      }
+
+      env {
+        name  = "ENABLE_AZURE_SPOT_COLLECTOR"
+        value = "true"
+      }
+
+      env {
+        name  = "AZURE_SPOT_EVICTION_ONLY"
+        value = "true"
+      }
+
+      env {
+        name  = "AZURE_SPOT_MAX_ITEMS"
+        value = var.max_spot_items
+      }
+
+      env {
+        name  = "JOB_TYPE"
+        value = "spot-eviction-hourly"
+      }
+
+      env {
+        name  = "PYTHONUNBUFFERED"
+        value = "1"
+      }
+
+      env {
+        name  = "LOG_LEVEL"
+        value = var.log_level
+      }
+
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.ingestion_jobs.client_id
+      }
+    }
+  }
+
+  secret {
+    name  = "pg-password"
+    value = var.postgres_admin_password
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.ingestion_jobs.id
+  }
+
+  tags = {
+    Environment = var.environment
+    Project     = "bdd-sku"
+    JobType     = "spot-eviction-hourly"
+  }
+}
+
+# ---------------------------------------------------------------------
 # Container Apps Job – Manual (on-demand)
 # ---------------------------------------------------------------------
 resource "azurerm_container_app_job" "ingestion_manual" {

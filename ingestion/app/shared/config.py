@@ -94,6 +94,10 @@ class ConfigManager:
                 "ENABLE_AZURE_SPOT_COLLECTOR", "false"
             ).lower()
             == "true",
+            "azure_spot_eviction_only": os.getenv(
+                "AZURE_SPOT_EVICTION_ONLY", "false"
+            ).lower()
+            == "true",
             "azure_spot_max_items": os.getenv("AZURE_SPOT_MAX_ITEMS", "-1"),
             "azure_spot_api_retry_attempts": os.getenv("AZURE_SPOT_API_RETRY_ATTEMPTS", "3"),
             "azure_spot_api_retry_delay": os.getenv("AZURE_SPOT_API_RETRY_DELAY", "2.0"),
@@ -136,6 +140,7 @@ class ConfigManager:
                     "api_retry_attempts": self._config["azure_spot_api_retry_attempts"],
                     "api_retry_delay": self._config["azure_spot_api_retry_delay"],
                     "max_items": self.get_int("azure_spot_max_items", -1),
+                    "eviction_only": self._config["azure_spot_eviction_only"],
                 }
             )
 

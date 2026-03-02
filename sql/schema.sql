@@ -79,18 +79,20 @@ CREATE INDEX IF NOT EXISTS idx_retail_prices_vm_job
 -- spot_eviction_rates: VM spot eviction rates from Resource Graph
 -- ============================================================
 CREATE TABLE IF NOT EXISTS spot_eviction_rates (
-    job_id       TEXT,
-    job_datetime TIMESTAMPTZ,
+    job_id       TEXT NOT NULL,
+    job_datetime TIMESTAMPTZ NOT NULL,
     sku_name     TEXT NOT NULL,
     region       TEXT NOT NULL,
     eviction_rate TEXT NOT NULL,
-    UNIQUE (sku_name, region)
+    UNIQUE (sku_name, region, job_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_spot_eviction_region
     ON spot_eviction_rates (region);
 CREATE INDEX IF NOT EXISTS idx_spot_eviction_sku
     ON spot_eviction_rates (sku_name);
+CREATE INDEX IF NOT EXISTS idx_spot_eviction_job_datetime
+    ON spot_eviction_rates (job_datetime DESC);
 
 -- ============================================================
 -- spot_price_history: VM spot price history from Resource Graph

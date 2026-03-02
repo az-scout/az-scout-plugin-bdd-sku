@@ -1,22 +1,28 @@
 # az-scout-plugin-bdd-sku
 
-Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les **prix retail des VM Azure** dans une base PostgreSQL locale. Permet des requêtes rapides et hors-ligne sur les prix, sans appeler l'API Azure à chaque fois.
+Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les **prix retail des VM Azure**, les **taux d'éviction Spot** et l'**historique des prix Spot** dans une base PostgreSQL locale. Permet des requêtes rapides et hors-ligne sans appeler les APIs Azure à chaque fois.
 
 ## Architecture
 
 ```
-┌────────────────────┐         ┌──────────────────┐         ┌──────────────┐
-│     az-scout       │  GET    │   Plugin routes   │  async  │  PostgreSQL  │
-│  (FastAPI :5001)   │ ──────▸ │  /plugins/bdd-sku │ ──────▸ │   (:5432)    │
-│                    │         │    /status         │         │              │
-│  MCP server        │         │                   │         │ retail_prices│
-│  cache_status tool │         └───────────────────┘         │ job_runs     │
-└────────────────────┘                                       │ job_logs     │
-                                                             └──────┬───────┘
-┌────────────────────┐                                              │
-│  Ingestion CLI     │  INSERT (psycopg2)                           │
-│  (one-shot Docker) │ ─────────────────────────────────────────────┘
+┌────────────────────┐         ┌───────────────────────────┐         ┌──────────────┐
+│     az-scout       │  GET    │   Plugin routes            │  async  │  PostgreSQL  │
+│  (FastAPI :5001)   │ ──────▸ │  /plugins/bdd-sku/        │ ──────▸ │   (:5432)    │
+│                    │         │    /status                 │         │              │
+│  MCP server        │         │    /spot/eviction-rates    │         │ retail_prices│
+│  4 outils exposés  │         │    /spot/eviction-rates/   │         │ spot_evict.  │
+│                    │         │         history            │         │ spot_price_h.│
+│                    │         │    /spot/price-history     │         │ job_runs     │
+└────────────────────┘         └───────────────────────────┘         │ job_logs     │
+                                                                     └──────┬───────┘
+┌────────────────────┐                                                      │
+│  Ingestion Jobs    │  INSERT (psycopg2)                                   │
+│  (Container Apps)  │ ────────────────────────────────────────────────────┘
 │                    │  ◂── Azure Retail Prices API (public, no auth)
+│  3 jobs :          │  ◂── Azure Resource Graph API (SpotResources)
+│  - daily (02:00)   │
+│  - hourly (evict.) │
+│  - manual          │
 └────────────────────┘
 ```
 
@@ -24,8 +30,171 @@ Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les *
 
 | Composant | Rôle | Technologie |
 |---|---|---|
-| **Plugin** (`src/az_scout_bdd_sku/`) | Tab UI + routes API + outil MCP, lecture seule depuis Postgres | FastAPI, psycopg (async), psycopg_pool |
-| **Ingestion** (`ingestion/`) | Job CLI one-shot qui collecte les prix et les insère dans Postgres | requests, psycopg2-binary |
+| **Plugin** (`src/az_scout_bdd_sku/`) | Tab UI + routes API + outils MCP, lecture seule depuis Postgres | FastAPI, psycopg (async), psycopg_pool |
+| **Ingestion** (`ingestion/`) | Jobs CLI one-shot qui collectent les prix et les insèrent dans Postgres | requests, psycopg2-binary, azure-identity |
+
+---
+
+## Endpoints API
+
+Tous les endpoints sont montés sous `/plugins/bdd-sku/` par az-scout.
+
+### `GET /plugins/bdd-sku/status`
+
+Statut global de la base de données : connectivité, comptage des tables et dernier run d'ingestion.
+
+**Réponse :**
+
+```json
+{
+  "db_connected": true,
+  "retail_prices_count": 42000,
+  "spot_eviction_rates_count": 11237,
+  "spot_price_history_count": 243335,
+  "last_run": {
+    "run_id": "a1b2c3...",
+    "status": "ok",
+    "started_at_utc": "2026-01-15T10:00:00+00:00",
+    "finished_at_utc": "2026-01-15T10:05:00+00:00",
+    "items_read": 45000,
+    "items_written": 42000,
+    "error_message": null
+  }
+}
+```
+
+---
+
+### `GET /plugins/bdd-sku/spot/eviction-rates`
+
+Taux d'éviction Spot VM. Sans `job_id`, retourne uniquement le **dernier snapshot** (le plus récent `job_datetime`).
+
+**Paramètres query :**
+
+| Paramètre | Type | Requis | Description |
+|---|---|---|---|
+| `region` | string | Non | Filtre exact par région Azure (ex : `eastus`) |
+| `sku_name` | string | Non | Filtre substring insensible à la casse (ex : `D2s` → `Standard_D2s_v3`) |
+| `job_id` | string | Non | UUID du snapshot spécifique. Si omis, retourne le dernier |
+| `limit` | int | Non | Nombre max de lignes (défaut : 200, min : 1, max : 5000) |
+
+**Exemple :**
+
+```bash
+# Dernier snapshot, filtre sur eastus
+curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates?region=eastus"
+
+# Snapshot spécifique
+curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates?job_id=abc-123"
+```
+
+**Réponse :**
+
+```json
+{
+  "count": 150,
+  "items": [
+    {
+      "sku_name": "Standard_D2s_v3",
+      "region": "eastus",
+      "eviction_rate": "5-10%",
+      "job_id": "abc-123",
+      "job_datetime": "2026-03-02T14:00:00+00:00"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /plugins/bdd-sku/spot/eviction-rates/history`
+
+Liste les **snapshots disponibles** des taux d'éviction. Chaque snapshot correspond à une exécution du collecteur (un `job_id` unique).
+
+**Paramètres query :**
+
+| Paramètre | Type | Requis | Description |
+|---|---|---|---|
+| `limit` | int | Non | Nombre max de snapshots (défaut : 50, min : 1, max : 500) |
+
+**Exemple :**
+
+```bash
+curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates/history"
+```
+
+**Réponse :**
+
+```json
+{
+  "count": 24,
+  "snapshots": [
+    {
+      "job_id": "abc-123",
+      "job_datetime": "2026-03-02T14:00:00+00:00",
+      "row_count": 11237
+    },
+    {
+      "job_id": "def-456",
+      "job_datetime": "2026-03-02T13:00:00+00:00",
+      "row_count": 11235
+    }
+  ]
+}
+```
+
+---
+
+### `GET /plugins/bdd-sku/spot/price-history`
+
+Historique des prix Spot VM (tableau de prix par SKU×région×OS).
+
+**Paramètres query :**
+
+| Paramètre | Type | Requis | Description |
+|---|---|---|---|
+| `region` | string | Non | Filtre exact par région Azure |
+| `sku_name` | string | Non | Filtre substring insensible à la casse |
+| `os_type` | string | Non | Filtre par OS (`Linux` ou `Windows`) |
+| `limit` | int | Non | Nombre max de lignes (défaut : 200, min : 1, max : 5000) |
+
+**Exemple :**
+
+```bash
+curl "http://localhost:5001/plugins/bdd-sku/spot/price-history?region=westeurope&os_type=Linux&sku_name=D4s"
+```
+
+**Réponse :**
+
+```json
+{
+  "count": 5,
+  "items": [
+    {
+      "sku_name": "Standard_D4s_v3",
+      "os_type": "Linux",
+      "region": "westeurope",
+      "price_history": [
+        {"timestamp": "2026-03-01T00:00:00Z", "spotPrice": 0.042},
+        {"timestamp": "2026-02-28T00:00:00Z", "spotPrice": 0.045}
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## Outils MCP
+
+Le plugin expose 4 outils sur le serveur MCP d'az-scout, utilisables par les LLMs dans le chat intégré.
+
+| Outil | Paramètres | Description |
+|---|---|---|
+| `cache_status` | *(aucun)* | Statut de la base : connectivité, comptage par table, dernier run |
+| `get_spot_eviction_rates` | `region?`, `sku_name?`, `job_id?` | Taux d'éviction Spot. Sans `job_id` → dernier snapshot |
+| `get_spot_eviction_history` | *(aucun)* | Liste les snapshots d'éviction disponibles (50 derniers) |
+| `get_spot_price_history` | `region?`, `sku_name?`, `os_type?` | Historique des prix Spot par SKU×région×OS |
 
 ---
 
@@ -128,17 +297,23 @@ docker run --rm \
 | `POSTGRES_USER` | `azscout` | Utilisateur |
 | `POSTGRES_PASSWORD` | `azscout` | Mot de passe |
 | `POSTGRES_SSLMODE` | `disable` | Mode SSL (`disable`, `require`, `verify-full`) |
-| `ENABLE_AZURE_PRICING_COLLECTOR` | `false` | **Doit être `true`** pour lancer la collecte |
-| `AZURE_PRICING_MAX_ITEMS` | `-1` | Limite d'items (-1 = illimité) |
-| `AZURE_PRICING_API_RETRY_ATTEMPTS` | `3` | Nombre de tentatives en cas d'erreur API |
-| `AZURE_PRICING_API_RETRY_DELAY` | `2.0` | Délai entre retries (secondes) |
+| `ENABLE_AZURE_PRICING_COLLECTOR` | `false` | Activer le collecteur de prix retail |
+| `AZURE_PRICING_MAX_ITEMS` | `-1` | Limite d'items pricing (-1 = illimité) |
+| `AZURE_PRICING_API_RETRY_ATTEMPTS` | `3` | Nombre de tentatives en cas d'erreur API pricing |
+| `AZURE_PRICING_API_RETRY_DELAY` | `2.0` | Délai entre retries pricing (secondes) |
 | `AZURE_PRICING_FILTERS` | `{}` | Filtres OData JSON (ex: `{"serviceName": "Virtual Machines"}`) |
+| `ENABLE_AZURE_SPOT_COLLECTOR` | `false` | Activer le collecteur Spot (éviction + prix) |
+| `AZURE_SPOT_EVICTION_ONLY` | `false` | Mode éviction uniquement (skip l'historique des prix Spot) |
+| `AZURE_SPOT_MAX_ITEMS` | `-1` | Limite d'items spot (-1 = illimité) |
+| `AZURE_SPOT_API_RETRY_ATTEMPTS` | `3` | Nombre de tentatives en cas d'erreur API spot |
+| `AZURE_SPOT_API_RETRY_DELAY` | `2.0` | Délai entre retries spot (secondes) |
 | `LOG_LEVEL` | `INFO` | Niveau de log (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `JOB_TYPE` | `manual` | Type de job (metadata) |
 
 #### Exemple avec filtres
 
 ```bash
+# Collecte pricing avec filtres
 docker run --rm \
   --network postgresql_default \
   -e POSTGRES_HOST=postgres \
@@ -146,6 +321,21 @@ docker run --rm \
   -e 'AZURE_PRICING_FILTERS={"serviceName": "Virtual Machines"}' \
   -e AZURE_PRICING_MAX_ITEMS=1000 \
   -e LOG_LEVEL=DEBUG \
+  bdd-sku-ingestion
+
+# Collecte spot (éviction + prix) — nécessite des credentials Azure
+docker run --rm \
+  --network postgresql_default \
+  -e POSTGRES_HOST=postgres \
+  -e ENABLE_AZURE_SPOT_COLLECTOR=true \
+  bdd-sku-ingestion
+
+# Collecte éviction uniquement (mode historisation horaire)
+docker run --rm \
+  --network postgresql_default \
+  -e POSTGRES_HOST=postgres \
+  -e ENABLE_AZURE_SPOT_COLLECTOR=true \
+  -e AZURE_SPOT_EVICTION_ONLY=true \
   bdd-sku-ingestion
 ```
 
@@ -161,6 +351,8 @@ La réponse `/status` :
 {
   "db_connected": true,
   "retail_prices_count": 42000,
+  "spot_eviction_rates_count": 11237,
+  "spot_price_history_count": 243335,
   "last_run": {
     "run_id": "a1b2c3...",
     "status": "ok",
@@ -182,9 +374,20 @@ L'infrastructure Azure est définie dans le dossier `infra/` et se déploie avec
 - **Azure Database for PostgreSQL – Flexible Server** (Burstable, PostgreSQL 17)
 - **Azure Container Registry** (Basic) pour stocker l'image d'ingestion
 - **Azure Container Apps Environment** avec Log Analytics
-- **2 Container Apps Jobs** :
-  - `pricing-scheduler` — cron quotidien (02:00 UTC)
-  - `pricing-manual` — déclenchement manuel à la demande
+- **3 Container Apps Jobs** :
+  - `{prefix}-sched` — cron quotidien (02:00 UTC) : collecte complète (pricing + spot)
+  - `{prefix}-spot-evict` — cron horaire : éviction uniquement (historisation)
+  - `{prefix}-manual` — déclenchement manuel à la demande
+
+### Jobs d'ingestion
+
+| Job | Cron | Collecteurs | CPU/Mém | Timeout |
+|---|---|---|---|---|
+| **Scheduled** (`-sched`) | `0 2 * * *` (02:00 UTC) | pricing + spot (éviction + prix) | 1 CPU / 2 Gi | 3600s |
+| **Spot Eviction Hourly** (`-spot-evict`) | `0 * * * *` (chaque heure) | spot éviction uniquement | 0.5 CPU / 1 Gi | 900s |
+| **Manual** (`-manual`) | On-demand | pricing + spot | 1 CPU / 2 Gi | 21600s |
+
+Le job horaire (`spot-evict`) lance le collecteur Spot avec `AZURE_SPOT_EVICTION_ONLY=true`, ce qui ne collecte que les ~11 000 taux d'éviction sans requêter l'historique des prix (~243 000 lignes). Chaque exécution crée un nouveau snapshot dans `spot_eviction_rates` (identifié par `job_id`), permettant de suivre l'évolution des taux d'éviction dans le temps.
 
 ### 1. Prérequis
 
@@ -288,7 +491,7 @@ Au démarrage d'az-scout, les logs affichent :
 ```
 INFO: Discovered plugin: bdd-sku v0.1.0
 INFO: Mounted plugin routes at /plugins/bdd-sku/
-INFO: Registered MCP tool: cache_status
+INFO: Registered MCP tools: cache_status, get_spot_eviction_rates, get_spot_eviction_history, get_spot_price_history
 INFO: Loaded plugin tab: SKU DB Cache
 ```
 
@@ -296,9 +499,9 @@ Le plugin ajoute :
 
 | Élément | Description |
 |---|---|
-| **Onglet UI** `SKU DB Cache` | Affiche le nombre de prix en cache et le dernier run d'ingestion |
-| **Route API** `GET /plugins/bdd-sku/status` | Statut de la base (connectivité, comptage, dernier run) |
-| **Outil MCP** `cache_status` | Même info que la route, accessible via le serveur MCP |
+| **Onglet UI** `SKU DB Cache` | Affiche les comptages (prix, éviction, historique) et le dernier run |
+| **4 routes API** | `/status`, `/spot/eviction-rates`, `/spot/eviction-rates/history`, `/spot/price-history` |
+| **4 outils MCP** | `cache_status`, `get_spot_eviction_rates`, `get_spot_eviction_history`, `get_spot_price_history` |
 
 ---
 
@@ -310,25 +513,26 @@ az-scout-plugin-bdd-sku/
 ├── README.md
 ├── LICENSE.txt
 ├── sql/
-│   └── schema.sql                  # Schéma PostgreSQL (3 tables)
+│   └── schema.sql                  # Schéma PostgreSQL (5 tables)
 ├── postgresql/
 │   └── docker-compose.yml          # Postgres 17 pour le développement local
 ├── infra/
 │   ├── main.tf                     # Provider + Resource Group + PostgreSQL Flexible Server
-│   ├── container-apps.tf           # ACR + Container Apps Environment + Jobs (cron + manuel)
+│   ├── container-apps.tf           # ACR + Container Apps Environment + 3 Jobs
 │   ├── variables.tf                # Variables Terraform
 │   ├── outputs.tf                  # Outputs (FQDN, noms de ressources, etc.)
 │   └── terraform.tfvars.example    # Exemple de fichier de variables
 ├── ingestion/
-│   ├── Dockerfile                  # Image Docker pour le job CLI
-│   ├── pyproject.toml              # Dépendances ingestion (psycopg2, requests)
+│   ├── Dockerfile                  # Image Docker pour les jobs CLI
+│   ├── pyproject.toml              # Dépendances ingestion (psycopg2, requests, azure-identity)
 │   └── app/
 │       ├── main.py                 # Point d'entrée CLI
 │       ├── core/
 │       │   ├── base_collector.py   # Classe abstraite BaseCollector
 │       │   └── orchestrator.py     # Orchestrateur de jobs
 │       ├── collectors/
-│       │   └── azure_pricing_collector.py  # Collecteur Azure Retail Prices API
+│       │   ├── azure_pricing_collector.py  # Collecteur Azure Retail Prices API
+│       │   └── azure_spot_collector.py     # Collecteur Azure Spot (éviction + prix)
 │       └── shared/
 │           ├── config.py           # Gestion des variables d'environnement
 │           └── pg_client.py        # Client PostgreSQL (sync)
@@ -337,25 +541,27 @@ az-scout-plugin-bdd-sku/
 │       ├── __init__.py             # Classe plugin + entry point
 │       ├── plugin_config.py        # Configuration TOML du plugin
 │       ├── db.py                   # Pool de connexions async (psycopg)
-│       ├── routes.py               # Routes FastAPI (GET /status)
-│       ├── tools.py                # Outil MCP cache_status
+│       ├── routes.py               # Routes FastAPI (4 endpoints)
+│       ├── tools.py                # Outils MCP (4 outils)
 │       └── static/
 │           ├── css/bdd-sku.css
 │           ├── html/bdd-sku-tab.html
 │           └── js/bdd-sku-tab.js
 └── tests/
-    └── test_bdd_sku.py             # Tests pytest (routes + outil MCP)
+    └── test_bdd_sku.py             # Tests pytest (routes + outils MCP)
 ```
 
 ## Base de données
 
-3 tables PostgreSQL :
+5 tables PostgreSQL :
 
 | Table | Description |
 |---|---|
 | `job_runs` | Suivi des exécutions d'ingestion (status, durée, items lus/écrits) |
 | `job_logs` | Logs détaillés par run |
 | `retail_prices_vm` | Prix retail des VM Azure (25 colonnes, UPSERT via contrainte UNIQUE) |
+| `spot_eviction_rates` | Taux d'éviction Spot par SKU×région (`UNIQUE (sku_name, region, job_id)` — un snapshot par exécution) |
+| `spot_price_history` | Historique des prix Spot par SKU×région×OS (tableau JSONB de prix horodatés) |
 
 ---
 
