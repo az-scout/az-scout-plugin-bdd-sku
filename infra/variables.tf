@@ -6,19 +6,19 @@ variable "subscription_id" {
 variable "resource_group_name" {
   description = "Name of the Azure resource group"
   type        = string
-  default     = "bdd-sku-RG"
+  default     = "rg-azure-scout-bdd"
 }
 
 variable "location" {
   description = "Azure region for resources"
   type        = string
-  default     = "germanywestcentral"
+  default     = "swedencentral"
 }
 
 variable "prefix" {
   description = "Prefix for resource names"
   type        = string
-  default     = "bdd-sku"
+  default     = "az-scout"
 }
 
 variable "environment" {

@@ -60,9 +60,8 @@ resource "azurerm_monitor_diagnostic_setting" "cae" {
     category = "ContainerAppSystemLogs"
   }
 
-  metric {
+  enabled_metric {
     category = "AllMetrics"
-    enabled  = true
   }
 }
 

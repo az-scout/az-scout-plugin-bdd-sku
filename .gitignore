@@ -27,3 +27,5 @@ src/*/_version.py
 *.tfstate.backup
 *.tfplan
 terraform.tfvars
+.terraform.lock.hcl
+.terraform.tfstate.lock.info
