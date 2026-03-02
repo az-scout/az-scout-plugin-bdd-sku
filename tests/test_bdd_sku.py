@@ -40,7 +40,6 @@ class TestStatus:
         started = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
         finished = datetime(2026, 1, 15, 10, 5, 0, tzinfo=UTC)
 
-        # Mock a connection that returns count=42, then a last_run row
         mock_conn = AsyncMock()
         call_count = 0
 
@@ -48,14 +47,16 @@ class TestStatus:
             nonlocal call_count
             call_count += 1
             cursor = AsyncMock()
-            if call_count == 1:
-                # COUNT(*)
+            if call_count <= 4:
+                # COUNT(*) queries (3 tables) + regions/skus count
                 cursor.fetchone = AsyncMock(return_value=(42,))
-            else:
-                # last run
+            elif "job_runs" in sql:
+                # _last_run_for → job_runs query
                 cursor.fetchone = AsyncMock(
                     return_value=(run_id, "ok", started, finished, 1000, 950, None)
                 )
+            else:
+                cursor.fetchone = AsyncMock(return_value=None)
             return cursor
 
         mock_conn.execute = fake_execute
@@ -94,15 +95,15 @@ class TestStatus:
         client: TestClient,
     ) -> None:
         mock_conn = AsyncMock()
-        call_count = 0
 
         async def fake_execute(sql: str, *args: object) -> AsyncMock:
-            nonlocal call_count
-            call_count += 1
             cursor = AsyncMock()
-            if call_count == 1:
+            if "COUNT(*)" in sql and "job_runs" not in sql and "MAX" not in sql:
                 cursor.fetchone = AsyncMock(return_value=(0,))
+            elif "COUNT(DISTINCT" in sql:
+                cursor.fetchone = AsyncMock(return_value=(0, 0))
             else:
+                # job_runs → no rows; fallback MAX → (None, 0)
                 cursor.fetchone = AsyncMock(return_value=None)
             return cursor
 
@@ -118,6 +119,48 @@ class TestStatus:
         assert data["db_connected"] is True
         assert data["retail_prices_count"] == 0
         assert data["last_run"] is None
+
+    @patch("az_scout_bdd_sku.routes.is_healthy", new_callable=AsyncMock, return_value=True)
+    @patch("az_scout_bdd_sku.routes.get_conn")
+    def test_status_fallback_from_data_table(
+        self,
+        mock_conn_ctx: MagicMock,
+        mock_healthy: AsyncMock,
+        client: TestClient,
+    ) -> None:
+        """When job_runs is empty, last_run falls back to MAX(job_datetime)."""
+        fallback_dt = datetime(2026, 2, 20, 8, 0, 0, tzinfo=UTC)
+        mock_conn = AsyncMock()
+
+        async def fake_execute(sql: str, *args: object) -> AsyncMock:
+            cursor = AsyncMock()
+            if "job_runs" in sql:
+                # No job_runs rows
+                cursor.fetchone = AsyncMock(return_value=None)
+            elif "MAX(job_datetime)" in sql:
+                # Fallback: data table has rows
+                cursor.fetchone = AsyncMock(return_value=(fallback_dt, 500))
+            elif "COUNT(DISTINCT" in sql:
+                cursor.fetchone = AsyncMock(return_value=(10, 200))
+            else:
+                # COUNT(*) queries
+                cursor.fetchone = AsyncMock(return_value=(500,))
+            return cursor
+
+        mock_conn.execute = fake_execute
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_conn_ctx.return_value = ctx
+
+        resp = client.get("/plugins/bdd-sku/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["last_run"] is not None
+        assert data["last_run"]["status"] == "ok"
+        assert data["last_run"]["items_written"] == 500
+        assert data["last_run"]["run_id"] is None
+        assert data["last_run_spot"] is not None
 
 
 class TestCacheStatusTool:

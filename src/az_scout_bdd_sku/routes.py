@@ -17,6 +17,64 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+
+async def _last_run_for(dataset: str, fallback_table: str) -> dict[str, Any] | None:
+    """Return the most recent job_runs entry for *dataset*.
+
+    If no ``job_runs`` row exists (ingestion ran before the orchestrator
+    recorded runs), fall back to ``MAX(job_datetime)`` from the data table
+    so the dashboard still shows meaningful "Last update" info.
+    """
+    try:
+        async with get_conn() as conn:
+            cur = await conn.execute(
+                "SELECT run_id, status, started_at_utc, finished_at_utc,"
+                "       items_read, items_written, error_message "
+                "FROM job_runs WHERE dataset = %s "
+                "ORDER BY started_at_utc DESC LIMIT 1",
+                (dataset,),
+            )
+            lr = await cur.fetchone()
+            if lr:
+                return {
+                    "run_id": str(lr[0]),
+                    "status": lr[1],
+                    "started_at_utc": lr[2].isoformat() if lr[2] else None,
+                    "finished_at_utc": lr[3].isoformat() if lr[3] else None,
+                    "items_read": lr[4] or 0,
+                    "items_written": lr[5] or 0,
+                    "error_message": lr[6],
+                }
+    except Exception:
+        pass
+
+    # Fallback: derive from the data table itself
+    try:
+        async with get_conn() as conn:
+            cur = await conn.execute(
+                f"SELECT MAX(job_datetime), COUNT(*) FROM {fallback_table}"  # noqa: S608
+            )
+            row = await cur.fetchone()
+            if row and row[0] is not None:
+                return {
+                    "run_id": None,
+                    "status": "ok",
+                    "started_at_utc": row[0].isoformat(),
+                    "finished_at_utc": row[0].isoformat(),
+                    "items_read": row[1] or 0,
+                    "items_written": row[1] or 0,
+                    "error_message": None,
+                }
+    except Exception:
+        pass
+
+    return None
+
+
+# ------------------------------------------------------------------
 # Status
 # ------------------------------------------------------------------
 
@@ -74,53 +132,8 @@ async def status() -> dict[str, Any]:
         except Exception:
             pass
 
-        try:
-            async with get_conn() as conn:
-                cur = await conn.execute(
-                    """
-                    SELECT run_id, status, started_at_utc, finished_at_utc,
-                           items_read, items_written, error_message
-                    FROM job_runs WHERE dataset = 'azure_pricing'
-                    ORDER BY started_at_utc DESC LIMIT 1
-                    """
-                )
-                lr = await cur.fetchone()
-                if lr:
-                    last_run = {
-                        "run_id": str(lr[0]),
-                        "status": lr[1],
-                        "started_at_utc": lr[2].isoformat() if lr[2] else None,
-                        "finished_at_utc": lr[3].isoformat() if lr[3] else None,
-                        "items_read": lr[4] or 0,
-                        "items_written": lr[5] or 0,
-                        "error_message": lr[6],
-                    }
-        except Exception:
-            last_run = None
-
-        try:
-            async with get_conn() as conn:
-                cur = await conn.execute(
-                    """
-                    SELECT run_id, status, started_at_utc, finished_at_utc,
-                           items_read, items_written, error_message
-                    FROM job_runs WHERE dataset = 'azure_spot'
-                    ORDER BY started_at_utc DESC LIMIT 1
-                    """
-                )
-                lr = await cur.fetchone()
-                if lr:
-                    last_run_spot = {
-                        "run_id": str(lr[0]),
-                        "status": lr[1],
-                        "started_at_utc": lr[2].isoformat() if lr[2] else None,
-                        "finished_at_utc": lr[3].isoformat() if lr[3] else None,
-                        "items_read": lr[4] or 0,
-                        "items_written": lr[5] or 0,
-                        "error_message": lr[6],
-                    }
-        except Exception:
-            last_run_spot = None
+        last_run = await _last_run_for("azure_pricing", "retail_prices_vm")
+        last_run_spot = await _last_run_for("azure_spot", "spot_eviction_rates")
 
     return {
         "db_connected": db_ok,

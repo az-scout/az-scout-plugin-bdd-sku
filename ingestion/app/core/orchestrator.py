@@ -100,11 +100,55 @@ class JobOrchestrator:
 
             for name in collector_names:
                 collector_start = datetime.now(UTC)
+                run_id = str(uuid.uuid4())
+
+                # Record job start in job_runs
+                try:
+                    with pg_conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO job_runs "
+                            "(run_id, dataset, status, started_at_utc) "
+                            "VALUES (%s, %s, %s, %s)",
+                            (run_id, name, "running", collector_start),
+                        )
+                    pg_conn.commit()
+                except Exception:
+                    self.logger.warning("Failed to insert job_runs row for %s", name)
+                    try:
+                        pg_conn.rollback()
+                    except Exception:
+                        pass
+
                 try:
                     self.logger.info("Running %s …", name)
                     result = self.collectors[name].run(pg_conn)
                     self.results.append(result)
                     self.logger.info("%s completed successfully", name)
+
+                    # Update job_runs → ok
+                    try:
+                        with pg_conn.cursor() as cur:
+                            cur.execute(
+                                "UPDATE job_runs SET status = %s, "
+                                "finished_at_utc = %s, "
+                                "items_read = %s, items_written = %s "
+                                "WHERE run_id = %s",
+                                (
+                                    "ok",
+                                    datetime.now(UTC),
+                                    result.get("total_collected", 0),
+                                    result.get("total_ingested", 0),
+                                    run_id,
+                                ),
+                            )
+                        pg_conn.commit()
+                    except Exception:
+                        self.logger.warning("Failed to update job_runs for %s", name)
+                        try:
+                            pg_conn.rollback()
+                        except Exception:
+                            pass
+
                 except Exception as exc:
                     collector_end = datetime.now(UTC)
                     duration = (collector_end - collector_start).total_seconds()
@@ -122,6 +166,24 @@ class JobOrchestrator:
                         }
                     )
                     self.logger.error("%s failed: %s", name, exc)
+
+                    # Update job_runs → error
+                    try:
+                        with pg_conn.cursor() as cur:
+                            cur.execute(
+                                "UPDATE job_runs SET status = %s, "
+                                "finished_at_utc = %s, "
+                                "error_message = %s "
+                                "WHERE run_id = %s",
+                                ("error", collector_end, str(exc), run_id),
+                            )
+                        pg_conn.commit()
+                    except Exception:
+                        self.logger.warning("Failed to update job_runs for %s", name)
+                        try:
+                            pg_conn.rollback()
+                        except Exception:
+                            pass
 
             end_time = datetime.now(UTC)
             total_duration = (end_time - start_time).total_seconds()
