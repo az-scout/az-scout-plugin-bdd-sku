@@ -16,9 +16,19 @@ Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les *
 └────────────────────┘         └───────────────────────────┘         │ job_logs     │
                                                                      └──────┬───────┘
 ┌────────────────────┐                                                      │
-│  Ingestion Jobs    │  INSERT (psycopg2)                                   │
+│  Standalone API    │  GET (async)                                         │
 │  (Container Apps)  │ ────────────────────────────────────────────────────┘
-│                    │  ◂── Azure Retail Prices API (public, no auth)
+│  azscout-api:8000  │  ◂── MSI token auth (Entra ID)
+│                    │
+│  /health           │
+│  /v1/*  (11 EP)    │
+│  /status, /spot/*  │
+└────────────────────┘
+                                                                     ┌──────┴───────┐
+┌────────────────────┐                                               │  PostgreSQL  │
+│  Ingestion Jobs    │  INSERT (psycopg2)                            │   (:5432)    │
+│  (Container Apps)  │ ─────────────────────────────────────────────▸│              │
+│                    │  ◂── Azure Retail Prices API (public, no auth)└──────────────┘
 │  3 jobs :          │  ◂── Azure Resource Graph API (SpotResources)
 │  - daily (02:00)   │
 │  - hourly (evict.) │
@@ -26,11 +36,12 @@ Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les *
 └────────────────────┘
 ```
 
-**Deux composants indépendants :**
+**Trois composants indépendants :**
 
 | Composant | Rôle | Technologie |
 |---|---|---|
 | **Plugin** (`src/az_scout_bdd_sku/`) | Tab UI + routes API + outils MCP, lecture seule depuis Postgres | FastAPI, psycopg (async), psycopg_pool |
+| **Standalone API** (`api/`) | Container App dédié exposant tous les endpoints en HTTPS 24/7 | FastAPI, uvicorn, azure-identity |
 | **Ingestion** (`ingestion/`) | Jobs CLI one-shot qui collectent les prix et les insèrent dans Postgres | requests, psycopg2-binary, azure-identity |
 
 ---
@@ -551,6 +562,184 @@ terraform destroy     # Confirmer avec 'yes'
 
 ---
 
+## API Standalone (Container App)
+
+L'API standalone est un conteneur FastAPI autonome (`api/`) qui expose **tous les endpoints** (legacy + v1) directement en HTTPS, sans dépendre d'az-scout. Il tourne 24/7 dans Azure Container Apps avec auto-scaling.
+
+### Architecture
+
+```
+Internet
+    │
+    ▼
+┌──────────────────────────────┐
+│  Azure Container App         │
+│  azscout-api (:8000)         │
+│                              │
+│  GET /health                 │  ← liveness/readiness probe
+│  GET /status                 │  ← legacy endpoints (4)
+│  GET /v1/status              │  ← v1 endpoints (11)
+│  GET /v1/retail/prices       │
+│  GET /v1/spot/eviction-rates │
+│  ...                         │
+│                              │
+│  Auth DB : MSI (Entra ID)    │
+└──────────┬───────────────────┘
+           │ token OAuth2
+           ▼
+┌──────────────────────────────┐
+│  Azure Database for PG       │
+│  az-scout-pg (:5432)         │
+└──────────────────────────────┘
+```
+
+### Structure
+
+```
+api/
+├── Dockerfile         # Image Python 3.12-slim, PYTHONPATH=/app/src
+├── main.py            # FastAPI app avec lifespan (pool DB), CORS, /health
+└── requirements.txt   # fastapi, uvicorn, psycopg, psycopg_pool, azure-identity
+```
+
+`api/main.py` importe directement le `router` du plugin (`az_scout_bdd_sku.routes`) — les mêmes endpoints, sans passer par az-scout.
+
+### Endpoints disponibles
+
+| Catégorie | Endpoints | Préfixe |
+|---|---|---|
+| Infra | `/health` | — |
+| Legacy (4) | `/status`, `/spot/eviction-rates`, `/spot/eviction-rates/history`, `/spot/price-history` | — |
+| v1 (11) | `/v1/status`, `/v1/locations`, `/v1/skus`, `/v1/currencies`, `/v1/os-types`, `/v1/retail/prices`, `/v1/retail/prices/latest`, `/v1/spot/prices`, `/v1/spot/eviction-rates`, `/v1/spot/eviction-rates/series`, `/v1/spot/eviction-rates/latest` | — |
+
+> **Note :** En mode standalone, les routes sont montées à la racine (pas sous `/plugins/bdd-sku/`).
+
+### Build & déploiement
+
+```bash
+# Construire l'image dans l'ACR (depuis la racine du repo)
+az acr build --registry azscoutacr --image bdd-sku-api:latest \
+  --platform linux/amd64 --file api/Dockerfile .
+
+# Le Container App pull automatiquement la dernière image au redémarrage
+# Pour forcer une mise à jour :
+az containerapp update --name azscout-api --resource-group rg-azure-scout-bdd \
+  --image azscoutacr.azurecr.io/bdd-sku-api:latest
+```
+
+### Configuration (variables d'environnement)
+
+| Variable | Valeur | Description |
+|---|---|---|
+| `POSTGRES_HOST` | FQDN du serveur PG | Hôte PostgreSQL |
+| `POSTGRES_PORT` | `5432` | Port PostgreSQL |
+| `POSTGRES_DB` | `azscout` | Nom de la base |
+| `POSTGRES_USER` | Nom de la MSI | Utilisateur PG (= nom de l'identité managée) |
+| `POSTGRES_SSLMODE` | `require` | Mode SSL |
+| `POSTGRES_AUTH_METHOD` | `msi` | Mode d'authentification (`password` ou `msi`) |
+| `AZURE_CLIENT_ID` | Client ID de la MSI | Pour `DefaultAzureCredential` (user-assigned identity) |
+| `PYTHONUNBUFFERED` | `1` | Logs temps réel |
+
+### Auto-scaling
+
+Le Container App est configuré avec :
+- **Min replicas** : 1 (toujours disponible)
+- **Max replicas** : 10
+- **Règle HTTP** : scale-out à 50 requêtes concurrentes par replica
+
+---
+
+## Authentification Managed Identity (MSI)
+
+L'API standalone et les jobs d'ingestion utilisent une **Managed Identity (User-Assigned)** pour se connecter à PostgreSQL sans mot de passe.
+
+### Principe
+
+```
+Container App        DefaultAzureCredential        PostgreSQL
+    │                        │                         │
+    │  get_token(scope)      │                         │
+    │ ─────────────────────▸ │                         │
+    │                        │  OAuth2 token           │
+    │ ◂───────────────────── │                         │
+    │                                                  │
+    │  CONNECT user=<msi-name> password=<token>        │
+    │ ────────────────────────────────────────────────▸ │
+    │                                                  │  Entra ID
+    │                                   token verify ◂─┤─── ✓
+    │  Connection established                          │
+    │ ◂──────────────────────────────────────────────── │
+```
+
+1. `DefaultAzureCredential` acquiert un token OAuth2 avec le scope `https://ossrdbms-aad.database.windows.net/.default`
+2. Le token est passé comme **password** dans la connexion PostgreSQL
+3. PostgreSQL valide le token via Entra ID
+4. L'utilisateur PG est le **nom de la Managed Identity** (pas un login classique)
+
+### Configuration côté Azure
+
+#### 1. Activer l'authentification Entra ID sur PostgreSQL
+
+```bash
+az postgres flexible-server update \
+  --name az-scout-pg \
+  --resource-group rg-azure-scout-bdd \
+  --microsoft-entra-auth Enabled \
+  --password-auth Enabled
+```
+
+#### 2. Ajouter la MSI comme administrateur Entra
+
+```bash
+az postgres flexible-server microsoft-entra-admin create \
+  --server-name az-scout-pg \
+  --resource-group rg-azure-scout-bdd \
+  --object-id <principal-id-de-la-msi> \
+  --display-name <nom-de-la-msi> \
+  --type ServicePrincipal
+```
+
+#### 3. Configurer le Container App
+
+```bash
+az containerapp update \
+  --name azscout-api \
+  --resource-group rg-azure-scout-bdd \
+  --set-env-vars \
+    POSTGRES_AUTH_METHOD=msi \
+    AZURE_CLIENT_ID=<client-id-de-la-msi> \
+    POSTGRES_USER=<nom-de-la-msi> \
+  --remove-env-vars POSTGRES_PASSWORD
+```
+
+### Configuration côté code
+
+Le fichier `plugin_config.py` supporte deux modes d'authentification :
+
+- **`password`** (défaut) : DSN classique `postgresql://user:pass@host/db`
+- **`msi`** : DSN sans mot de passe (`host=... user=...`), le token est fourni dynamiquement
+
+Le fichier `db.py` acquiert un token frais via `DefaultAzureCredential` à chaque création de pool :
+
+```python
+from azure.identity import DefaultAzureCredential
+
+credential = DefaultAzureCredential(managed_identity_client_id="<client-id>")
+token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
+# token.token est passé comme password à psycopg
+```
+
+### Terraform (IaC)
+
+La configuration MSI est gérée dans `infra/` :
+
+- **`main.tf`** : Active `active_directory_auth_enabled` sur le serveur PG et déclare la MSI comme `azurerm_postgresql_flexible_server_active_directory_administrator`
+- **`container-apps.tf`** : Le Container App API utilise `POSTGRES_AUTH_METHOD=msi` et `AZURE_CLIENT_ID` au lieu de `POSTGRES_PASSWORD`
+
+> **Avantages MSI :** Pas de mot de passe à gérer, rotation automatique des tokens, audit via Entra ID, pas de secrets dans les variables d'environnement.
+
+---
+
 ## Intégration du plugin dans az-scout
 
 ### Installation depuis PyPI (ou un registre privé)
@@ -605,13 +794,17 @@ az-scout-plugin-bdd-sku/
 ├── pyproject.toml                  # Package config, entry point, dépendances
 ├── README.md
 ├── LICENSE.txt
+├── api/
+│   ├── Dockerfile                  # Image Python 3.12-slim, PYTHONPATH=/app/src
+│   ├── main.py                     # FastAPI standalone (lifespan, CORS, /health)
+│   └── requirements.txt            # fastapi, uvicorn, psycopg, azure-identity
 ├── sql/
 │   └── schema.sql                  # Schéma PostgreSQL (5 tables)
 ├── postgresql/
 │   └── docker-compose.yml          # Postgres 17 pour le développement local
 ├── infra/
-│   ├── main.tf                     # Provider + Resource Group + PostgreSQL Flexible Server
-│   ├── container-apps.tf           # ACR + Container Apps Environment + 3 Jobs
+│   ├── main.tf                     # Provider + RG + PG Flexible Server + Entra admin MSI
+│   ├── container-apps.tf           # ACR + Container Apps (API + 3 Jobs) + MSI
 │   ├── variables.tf                # Variables Terraform
 │   ├── outputs.tf                  # Outputs (FQDN, noms de ressources, etc.)
 │   └── terraform.tfvars.example    # Exemple de fichier de variables
@@ -632,9 +825,9 @@ az-scout-plugin-bdd-sku/
 ├── src/
 │   └── az_scout_bdd_sku/
 │       ├── __init__.py             # Classe plugin + entry point
-│       ├── plugin_config.py        # Configuration TOML du plugin
-│       ├── db.py                   # Pool de connexions async (psycopg)
-│       ├── routes.py               # Routes FastAPI (4 endpoints)
+│       ├── plugin_config.py        # Configuration (TOML, env vars, auth password/msi)
+│       ├── db.py                   # Pool async (psycopg) + MSI token auth
+│       ├── routes.py               # Routes FastAPI (legacy + v1, 15 endpoints)
 │       ├── tools.py                # Outils MCP (4 outils)
 │       └── static/
 │           ├── css/bdd-sku.css
