@@ -23,6 +23,13 @@ max_pricing_items = "-1"         # -1 = unlimited
 cron_expression   = "0 2 * * *"  # Daily at 02:00 UTC
 log_level         = "INFO"
 
+# API Container App
+api_cpu          = 0.5
+api_memory       = "1Gi"
+api_min_replicas = 1
+api_max_replicas = 10
+api_port         = 8000
+
 # ---------------------------------------------------------------
 # Example: Development environment (lower cost)
 # ---------------------------------------------------------------
@@ -33,3 +40,7 @@ log_level         = "INFO"
 # postgres_storage_mb     = 32768
 # max_pricing_items       = "1000"
 # log_level               = "DEBUG"
+# api_cpu                 = 0.25
+# api_memory              = "0.5Gi"
+# api_min_replicas        = 1
+# api_max_replicas        = 3

@@ -47,3 +47,22 @@ output "resource_group_name" {
   description = "Resource group name"
   value       = azurerm_resource_group.main.name
 }
+
+# ---------------------------------------------------------------------
+# API Container App
+# ---------------------------------------------------------------------
+
+output "api_fqdn" {
+  description = "FQDN of the API Container App"
+  value       = azurerm_container_app.api.ingress[0].fqdn
+}
+
+output "api_url" {
+  description = "Public HTTPS URL of the API"
+  value       = "https://${azurerm_container_app.api.ingress[0].fqdn}"
+}
+
+output "api_container_app_name" {
+  description = "Name of the API Container App"
+  value       = azurerm_container_app.api.name
+}

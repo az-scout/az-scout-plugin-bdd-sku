@@ -100,3 +100,37 @@ variable "log_level" {
   type        = string
   default     = "INFO"
 }
+
+# ---------------------------------------------------------------------
+# API Container App
+# ---------------------------------------------------------------------
+
+variable "api_cpu" {
+  description = "CPU cores for the API container (e.g. 0.25, 0.5, 1.0)"
+  type        = number
+  default     = 0.5
+}
+
+variable "api_memory" {
+  description = "Memory for the API container (e.g. 1Gi, 2Gi)"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "api_min_replicas" {
+  description = "Minimum number of API replicas (>=1 for always-on)"
+  type        = number
+  default     = 1
+}
+
+variable "api_max_replicas" {
+  description = "Maximum number of API replicas for auto-scaling"
+  type        = number
+  default     = 10
+}
+
+variable "api_port" {
+  description = "Port exposed by the API container"
+  type        = number
+  default     = 8000
+}

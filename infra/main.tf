@@ -49,10 +49,26 @@ resource "azurerm_postgresql_flexible_server" "main" {
   public_network_access_enabled = true
   zone                          = "1"
 
+  authentication {
+    active_directory_auth_enabled = true
+    password_auth_enabled         = true
+    tenant_id                     = data.azurerm_client_config.current.tenant_id
+  }
+
   tags = {
     Environment = var.environment
     Project     = "bdd-sku"
   }
+}
+
+# Entra ID admin – the managed identity used by Container Apps
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "msi" {
+  server_name         = azurerm_postgresql_flexible_server.main.name
+  resource_group_name = azurerm_resource_group.main.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  object_id           = azurerm_user_assigned_identity.ingestion_jobs.principal_id
+  principal_name      = azurerm_user_assigned_identity.ingestion_jobs.name
+  principal_type      = "ServicePrincipal"
 }
 
 # Firewall rule: allow Azure services (Container Apps Jobs)

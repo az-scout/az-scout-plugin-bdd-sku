@@ -1,18 +1,23 @@
 """az-scout SKU DB Cache plugin.
 
-Provides a UI tab, API routes and MCP tools for querying
+Provides a UI tab, MCP tools and (formerly) API routes for querying
 VM retail pricing data cached in a PostgreSQL database by
 the companion ingestion CLI.
+
+API routes are now served by a standalone Container App.
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from az_scout.plugin_api import ChatMode, TabDefinition
-from fastapi import APIRouter
+if TYPE_CHECKING:
+    from az_scout.plugin_api import ChatMode, TabDefinition
+    from fastapi import APIRouter
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -29,9 +34,8 @@ class BddSkuPlugin:
     version = __version__
 
     def get_router(self) -> APIRouter | None:
-        from az_scout_bdd_sku.routes import router
-
-        return router
+        # Routes are served by the standalone API container.
+        return None
 
     def get_mcp_tools(self) -> list[Callable[..., Any]] | None:
         from az_scout_bdd_sku.tools import (
@@ -64,8 +68,10 @@ class BddSkuPlugin:
         return _STATIC_DIR
 
     def get_tabs(self) -> list[TabDefinition] | None:
+        from az_scout.plugin_api import TabDefinition as _TabDef
+
         return [
-            TabDefinition(
+            _TabDef(
                 id="bdd-sku",
                 label="SKU DB Cache",
                 icon="bi bi-database",

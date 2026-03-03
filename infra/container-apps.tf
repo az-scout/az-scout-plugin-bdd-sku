@@ -454,3 +454,123 @@ resource "azurerm_container_app_job" "ingestion_manual" {
     JobType     = "manual"
   }
 }
+
+# ---------------------------------------------------------------------
+# Container App – API (always-on, auto-scaling)
+# ---------------------------------------------------------------------
+resource "azurerm_container_app" "api" {
+  name                         = "${var.prefix}-api"
+  resource_group_name          = azurerm_resource_group.main.name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  revision_mode                = "Single"
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.ingestion_jobs.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.ingestion_jobs.id
+  }
+
+  secret {
+    name  = "pg-password"
+    value = var.postgres_admin_password
+  }
+
+  ingress {
+    external_enabled = true
+    target_port      = var.api_port
+    transport        = "auto"
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
+  template {
+    min_replicas = var.api_min_replicas
+    max_replicas = var.api_max_replicas
+
+    http_scale_rule {
+      name                = "http-concurrency"
+      concurrent_requests = "50"
+    }
+
+    container {
+      name   = "bdd-sku-api"
+      image  = "${azurerm_container_registry.main.login_server}/bdd-sku-api:latest"
+      cpu    = var.api_cpu
+      memory = var.api_memory
+
+      env {
+        name  = "POSTGRES_HOST"
+        value = azurerm_postgresql_flexible_server.main.fqdn
+      }
+
+      env {
+        name  = "POSTGRES_PORT"
+        value = "5432"
+      }
+
+      env {
+        name  = "POSTGRES_DB"
+        value = var.postgres_db_name
+      }
+
+      env {
+        name  = "POSTGRES_USER"
+        value = azurerm_user_assigned_identity.ingestion_jobs.name
+      }
+
+      env {
+        name  = "POSTGRES_SSLMODE"
+        value = "require"
+      }
+
+      env {
+        name  = "POSTGRES_AUTH_METHOD"
+        value = "msi"
+      }
+
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.ingestion_jobs.client_id
+      }
+
+      env {
+        name  = "PYTHONUNBUFFERED"
+        value = "1"
+      }
+
+      liveness_probe {
+        transport = "HTTP"
+        port      = var.api_port
+        path      = "/health"
+
+        initial_delay    = 5
+        interval_seconds = 30
+        timeout          = 5
+        failure_count_threshold = 3
+      }
+
+      readiness_probe {
+        transport = "HTTP"
+        port      = var.api_port
+        path      = "/health"
+
+        interval_seconds = 10
+        timeout          = 5
+        failure_count_threshold = 3
+      }
+    }
+  }
+
+  tags = {
+    Environment = var.environment
+    Project     = "bdd-sku"
+    Component   = "api"
+  }
+}
