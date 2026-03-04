@@ -29,3 +29,4 @@ src/*/_version.py
 terraform.tfvars
 .terraform.lock.hcl
 .terraform.tfstate.lock.info
+*.7z
