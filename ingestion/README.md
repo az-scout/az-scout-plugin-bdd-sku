@@ -1,6 +1,6 @@
 # Ingestion CLI
 
-Job CLI one-shot qui collecte les **prix retail des VM Azure** depuis l'[Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices) (publique, sans authentification) et les insère dans PostgreSQL.
+One-shot CLI job that collects **Azure VM retail prices** from the [Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices) (public, no authentication required) and inserts them into PostgreSQL.
 
 ## Architecture
 
@@ -14,63 +14,63 @@ Azure Retail Prices API         Ingestion CLI              PostgreSQL (:5432)
 └───────────────────┘          └──────────────────┘        └────────────────┘
 ```
 
-## Prérequis
+## Prerequisites
 
-- **Docker** et **Docker Compose** installés ([installer Docker](https://docs.docker.com/get-docker/))
-- Aucun compte Azure nécessaire — l'API de prix est publique et gratuite
-- ~500 Mo d'espace disque pour l'image Docker et les données PostgreSQL
+- **Docker** and **Docker Compose** installed ([install Docker](https://docs.docker.com/get-docker/))
+- No Azure account required — the pricing API is public and free
+- ~500 MB of disk space for the Docker image and PostgreSQL data
 
-Vérifier que Docker fonctionne :
+Verify that Docker is working:
 
 ```bash
-docker --version          # Docker version 24+ attendu
-docker compose version    # Docker Compose version v2+ attendu
+docker --version          # Docker version 24+ expected
+docker compose version    # Docker Compose version v2+ expected
 ```
 
-## Guide pas-à-pas
+## Step-by-step Guide
 
-### Étape 1 — Démarrer PostgreSQL
+### Step 1 — Start PostgreSQL
 
-PostgreSQL reçoit les données collectées. Un fichier `docker-compose.yml` est fourni dans le dossier `postgresql/` pour le lancer en un clic.
+PostgreSQL receives the collected data. A `docker-compose.yml` file is provided in the `postgresql/` folder to start it with one click.
 
 ```bash
-# Depuis la racine du projet az-scout-plugin-bdd-sku
+# From the root of the az-scout-plugin-bdd-sku project
 cd postgresql/
 docker compose up -d
 ```
 
-Cela crée automatiquement :
-- Un conteneur PostgreSQL 17 sur le port **5432**
-- Une base de données `azscout` (user: `azscout`, password: `azscout`)
-- Les 3 tables nécessaires (`retail_prices_vm`, `job_runs`, `job_logs`) via `sql/schema.sql`
-- Un réseau Docker nommé `postgresql_default` (utilisé ensuite par l'ingestion)
+This automatically creates:
+- A PostgreSQL 17 container on port **5432**
+- A database `azscout` (user: `azscout`, password: `azscout`)
+- The 3 required tables (`retail_prices_vm`, `job_runs`, `job_logs`) via `sql/schema.sql`
+- A Docker network named `postgresql_default` (used later by the ingestion)
 
-**Vérifier que PostgreSQL est prêt :**
+**Verify that PostgreSQL is ready:**
 
 ```bash
 docker compose ps
 ```
 
-Vous devez voir :
+You should see:
 
 ```
 NAME       IMAGE         STATUS
 postgres   postgres:17   Up X seconds (healthy)
 ```
 
-> **Dépannage :** Si le statut est `(health: starting)`, attendre quelques secondes et relancer `docker compose ps`. Si le port 5432 est déjà utilisé, arrêter l'autre service ou modifier le port dans `docker-compose.yml`.
+> **Troubleshooting:** If the status is `(health: starting)`, wait a few seconds and re-run `docker compose ps`. If port 5432 is already in use, stop the other service or modify the port in `docker-compose.yml`.
 
-### Étape 2 — Construire l'image d'ingestion
+### Step 2 — Build the ingestion image
 
 ```bash
-# Revenir à la racine du projet puis aller dans ingestion/
+# Go back to the project root then into ingestion/
 cd ../ingestion/
 docker build -t bdd-sku-ingestion .
 ```
 
-Le build installe Python 3.12, les dépendances (`requests`, `psycopg2`) et copie le code. Cela prend environ 30 secondes la première fois.
+The build installs Python 3.12, the dependencies (`requests`, `psycopg2`), and copies the code. It takes about 30 seconds the first time.
 
-### Étape 3 — Lancer l'ingestion
+### Step 3 — Run the ingestion
 
 ```bash
 docker run --rm \
@@ -80,48 +80,48 @@ docker run --rm \
   bdd-sku-ingestion
 ```
 
-**Explication des paramètres :**
+**Parameter explanation:**
 
-| Paramètre | Rôle |
+| Parameter | Purpose |
 |---|---|
-| `--rm` | Supprime le conteneur après exécution (c'est un job one-shot) |
-| `--network postgresql_default` | Connecte le conteneur au même réseau que PostgreSQL |
-| `-e POSTGRES_HOST=postgres` | Indique l'adresse de PostgreSQL (`postgres` est le nom du service dans docker-compose) |
-| `-e ENABLE_AZURE_PRICING_COLLECTOR=true` | Active la collecte (désactivée par défaut par sécurité) |
+| `--rm` | Removes the container after execution (it's a one-shot job) |
+| `--network postgresql_default` | Connects the container to the same network as PostgreSQL |
+| `-e POSTGRES_HOST=postgres` | Specifies the PostgreSQL address (`postgres` is the service name in docker-compose) |
+| `-e ENABLE_AZURE_PRICING_COLLECTOR=true` | Enables collection (disabled by default for safety) |
 
-Le job démarre, affiche les logs de progression (pages collectées, items insérés), puis se termine automatiquement.
+The job starts, displays progress logs (pages collected, items inserted), then terminates automatically.
 
-> **Note :** Sans filtre, l'ingestion collecte **tous** les prix Azure (plusieurs centaines de milliers d'items). Utiliser `AZURE_PRICING_MAX_ITEMS` pour limiter lors des tests — voir la section [Exemples](#exemples) ci-dessous.
+> **Note:** Without filters, the ingestion collects **all** Azure prices (several hundred thousand items). Use `AZURE_PRICING_MAX_ITEMS` to limit during testing — see the [Examples](#examples) section below.
 
-### Étape 4 — Vérifier les données
+### Step 4 — Verify the data
 
 ```bash
-# Se connecter à PostgreSQL
+# Connect to PostgreSQL
 docker exec -it postgresql-postgres-1 psql -U azscout -d azscout
 
-# Compter les prix collectés
+# Count collected prices
 SELECT COUNT(*) FROM retail_prices_vm;
 
-# Voir le dernier run d'ingestion
+# View the last ingestion run
 SELECT run_id, status, items_written, started_at_utc FROM job_runs ORDER BY started_at_utc DESC LIMIT 1;
 
-# Quitter psql
+# Exit psql
 \q
 ```
 
-### Étape 5 — Arrêter l'environnement
+### Step 5 — Stop the environment
 
-Quand vous avez fini :
+When you're done:
 
 ```bash
 cd ../postgresql/
-docker compose down        # Arrête PostgreSQL (les données sont conservées dans le volume)
-docker compose down -v     # Arrête ET supprime les données PostgreSQL
+docker compose down        # Stops PostgreSQL (data is preserved in the volume)
+docker compose down -v     # Stops AND deletes PostgreSQL data
 ```
 
-## Alternative : sans Docker
+## Alternative: without Docker
 
-Si vous ne souhaitez pas utiliser Docker pour l'ingestion (PostgreSQL reste nécessaire) :
+If you prefer not to use Docker for ingestion (PostgreSQL is still required):
 
 ```bash
 cd ingestion/
@@ -136,11 +136,11 @@ ENABLE_AZURE_PRICING_COLLECTOR=true \
   python app/main.py
 ```
 
-> Ici `POSTGRES_HOST=localhost` car le script tourne directement sur la machine hôte, pas dans un conteneur Docker.
+> Here `POSTGRES_HOST=localhost` because the script runs directly on the host machine, not inside a Docker container.
 
-## Exemples
+## Examples
 
-### Test rapide (1000 items seulement)
+### Quick test (1000 items only)
 
 ```bash
 docker run --rm \
@@ -151,7 +151,7 @@ docker run --rm \
   bdd-sku-ingestion
 ```
 
-### Collecter uniquement les VM
+### Collect VM prices only
 
 ```bash
 docker run --rm \
@@ -162,7 +162,7 @@ docker run --rm \
   bdd-sku-ingestion
 ```
 
-### Mode verbose (debug)
+### Verbose mode (debug)
 
 ```bash
 docker run --rm \
@@ -174,30 +174,30 @@ docker run --rm \
   bdd-sku-ingestion
 ```
 
-## Variables d'environnement
+## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `POSTGRES_HOST` | `localhost` | Adresse du serveur PostgreSQL. Utiliser `postgres` si le conteneur est dans le réseau Docker, `localhost` si le script tourne en local |
-| `POSTGRES_PORT` | `5432` | Port PostgreSQL |
-| `POSTGRES_DB` | `azscout` | Nom de la base de données |
-| `POSTGRES_USER` | `azscout` | Utilisateur PostgreSQL |
-| `POSTGRES_PASSWORD` | `azscout` | Mot de passe PostgreSQL |
-| `POSTGRES_SSLMODE` | `disable` | Mode SSL (`disable` en local, `require` sur Azure) |
-| `ENABLE_AZURE_PRICING_COLLECTOR` | `false` | **Doit être `true`** pour lancer la collecte. Sécurité pour éviter les exécutions accidentelles |
-| `AZURE_PRICING_MAX_ITEMS` | `-1` | Nombre max d'items à collecter. `-1` = illimité. Utiliser `1000` pour tester |
-| `AZURE_PRICING_FILTERS` | `{}` | Filtres OData en JSON. Exemple : `{"serviceName": "Virtual Machines"}` |
-| `AZURE_PRICING_API_RETRY_ATTEMPTS` | `3` | Nombre de tentatives en cas d'erreur API (429, 5xx) |
-| `AZURE_PRICING_API_RETRY_DELAY` | `2.0` | Délai en secondes entre les retries |
-| `LOG_LEVEL` | `INFO` | Niveau de log : `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `JOB_TYPE` | `manual` | Metadata du job (descriptif libre) |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL server address. Use `postgres` if the container is on the Docker network, `localhost` if the script runs locally |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `azscout` | Database name |
+| `POSTGRES_USER` | `azscout` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | `azscout` | PostgreSQL password |
+| `POSTGRES_SSLMODE` | `disable` | SSL mode (`disable` locally, `require` on Azure) |
+| `ENABLE_AZURE_PRICING_COLLECTOR` | `false` | **Must be `true`** to start collection. Safety measure to prevent accidental runs |
+| `AZURE_PRICING_MAX_ITEMS` | `-1` | Maximum number of items to collect. `-1` = unlimited. Use `1000` for testing |
+| `AZURE_PRICING_FILTERS` | `{}` | OData filters as JSON. Example: `{"serviceName": "Virtual Machines"}` |
+| `AZURE_PRICING_API_RETRY_ATTEMPTS` | `3` | Number of retries on API error (429, 5xx) |
+| `AZURE_PRICING_API_RETRY_DELAY` | `2.0` | Delay in seconds between retries |
+| `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `JOB_TYPE` | `manual` | Job metadata (free-form description) |
 
-## Dépannage
+## Troubleshooting
 
-| Problème | Cause | Solution |
+| Problem | Cause | Solution |
 |---|---|---|
-| `network postgresql_default not found` | PostgreSQL n'est pas démarré | Lancer `cd postgresql/ && docker compose up -d` d'abord |
-| `connection refused` sur port 5432 | PostgreSQL pas encore prêt | Attendre quelques secondes, vérifier `docker compose ps` |
-| `POSTGRES_HOST=postgres` ne fonctionne pas | Le script tourne en dehors de Docker | Utiliser `POSTGRES_HOST=localhost` à la place |
-| `ENABLE_AZURE_PRICING_COLLECTOR` oublié | La collecte n'est pas activée | Ajouter `-e ENABLE_AZURE_PRICING_COLLECTOR=true` |
-| Ingestion très lente | Collecte de tout le catalogue sans filtre | Ajouter `-e AZURE_PRICING_MAX_ITEMS=1000` pour tester |
+| `network postgresql_default not found` | PostgreSQL is not running | Run `cd postgresql/ && docker compose up -d` first |
+| `connection refused` on port 5432 | PostgreSQL not ready yet | Wait a few seconds, check `docker compose ps` |
+| `POSTGRES_HOST=postgres` doesn't work | The script is running outside Docker | Use `POSTGRES_HOST=localhost` instead |
+| `ENABLE_AZURE_PRICING_COLLECTOR` forgotten | Collection is not enabled | Add `-e ENABLE_AZURE_PRICING_COLLECTOR=true` |
+| Very slow ingestion | Collecting the entire catalog without filters | Add `-e AZURE_PRICING_MAX_ITEMS=1000` for testing |

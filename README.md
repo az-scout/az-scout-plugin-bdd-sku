@@ -1,6 +1,6 @@
 # az-scout-plugin-bdd-sku
 
-Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les **prix retail des VM Azure**, les **taux d'éviction Spot** et l'**historique des prix Spot** dans une base PostgreSQL locale. Permet des requêtes rapides et hors-ligne sans appeler les APIs Azure à chaque fois.
+[az-scout](https://github.com/lrivallain/az-scout) plugin that caches **Azure VM retail prices**, **Spot eviction rates**, and **Spot price history** in a local PostgreSQL database. Enables fast, offline queries without calling Azure APIs every time.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les *
 │  (FastAPI :5001)   │ ──────▸ │  /plugins/bdd-sku/        │ ──────▸ │   (:5432)    │
 │                    │         │    /status                 │         │              │
 │  MCP server        │         │    /spot/eviction-rates    │         │ retail_prices│
-│  24 outils exposés │         │    /spot/eviction-rates/   │         │ spot_evict.  │
+│  24 tools exposed  │         │    /spot/eviction-rates/   │         │ spot_evict.  │
 │                    │         │         history            │         │ spot_price_h.│
 │                    │         │    /spot/price-history     │         │ vm_sku_catal.│
 │                    │         │    /spot/price-history     │         │ job_runs     │
@@ -30,7 +30,7 @@ Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les *
 │  Ingestion Jobs    │  INSERT (psycopg2)                            │   (:5432)    │
 │  (Container Apps)  │ ─────────────────────────────────────────────▸│              │
 │                    │  ◂── Azure Retail Prices API (public, no auth)└──────┬───────┘
-│  3 jobs :          │  ◂── Azure Resource Graph API (SpotResources)        │
+│  3 jobs:           │  ◂── Azure Resource Graph API (SpotResources)        │
 │  - daily (02:00)   │                                                      │
 │  - hourly (evict.) │                                                      │
 │  - manual          │                                                      │
@@ -40,31 +40,31 @@ Plugin [az-scout](https://github.com/lrivallain/az-scout) qui met en cache les *
 │  SKU Mapper Job    │  READ distinct SKUs + UPSERT vm_sku_catalog          │
 │  (Container Apps)  │ ─────────────────────────────────────────────────────┘
 │                    │
-│  daily (04:00)     │  ◂── Aucune API externe (données locales uniquement)
+│  daily (04:00)     │  ◂── No external API (local data only)
 │  password auth     │
 └────────────────────┘
 ```
 
-**Quatre composants indépendants :**
+**Four independent components:**
 
-| Composant | Rôle | Technologie |
+| Component | Role | Technology |
 |---|---|---|
-| **Plugin** (`src/az_scout_bdd_sku/`) | Tab UI + routes API + outils MCP, lecture seule depuis Postgres | FastAPI, psycopg (async), psycopg_pool |
-| **Standalone API** (`api/`) | Container App dédié exposant tous les endpoints en HTTPS 24/7 | FastAPI, uvicorn, azure-identity |
-| **Ingestion** (`ingestion/`) | Jobs CLI one-shot qui collectent les prix et les insèrent dans Postgres | requests, psycopg2-binary, azure-identity |
-| **SKU Mapper** (`sku-mapper-job/`) | Job batch quotidien qui enrichit la table `vm_sku_catalog` (famille, catégorie, vCPU…) | psycopg3, regex parser |
+| **Plugin** (`src/az_scout_bdd_sku/`) | UI tab + API routes + MCP tools, read-only from Postgres | FastAPI, psycopg (async), psycopg_pool |
+| **Standalone API** (`api/`) | Dedicated Container App exposing all endpoints over HTTPS 24/7 | FastAPI, uvicorn, azure-identity |
+| **Ingestion** (`ingestion/`) | One-shot CLI jobs that collect prices and insert them into Postgres | requests, psycopg2-binary, azure-identity |
+| **SKU Mapper** (`sku-mapper-job/`) | Daily batch job that enriches the `vm_sku_catalog` table (family, category, vCPU…) | psycopg3, regex parser |
 
 ---
 
-## Endpoints API
+## API Endpoints
 
-Tous les endpoints sont montés sous `/plugins/bdd-sku/` par az-scout.
+All endpoints are mounted under `/plugins/bdd-sku/` by az-scout.
 
 ### `GET /plugins/bdd-sku/status`
 
-Statut global de la base de données : connectivité, comptage des tables et dernier run d'ingestion.
+Global database status: connectivity, table counts, and last ingestion run.
 
-**Réponse :**
+**Response:**
 
 ```json
 {
@@ -88,28 +88,28 @@ Statut global de la base de données : connectivité, comptage des tables et der
 
 ### `GET /plugins/bdd-sku/spot/eviction-rates`
 
-Taux d'éviction Spot VM. Sans `job_id`, retourne uniquement le **dernier snapshot** (le plus récent `job_datetime`).
+Spot VM eviction rates. Without `job_id`, returns only the **latest snapshot** (most recent `job_datetime`).
 
-**Paramètres query :**
+**Query parameters:**
 
-| Paramètre | Type | Requis | Description |
+| Parameter | Type | Required | Description |
 |---|---|---|---|
-| `region` | string | Non | Filtre exact par région Azure (ex : `eastus`) |
-| `sku_name` | string | Non | Filtre substring insensible à la casse (ex : `D2s` → `Standard_D2s_v3`) |
-| `job_id` | string | Non | UUID du snapshot spécifique. Si omis, retourne le dernier |
-| `limit` | int | Non | Nombre max de lignes (défaut : 200, min : 1, max : 5000) |
+| `region` | string | No | Exact filter by Azure region (e.g. `eastus`) |
+| `sku_name` | string | No | Case-insensitive substring filter (e.g. `D2s` → `Standard_D2s_v3`) |
+| `job_id` | string | No | UUID of a specific snapshot. If omitted, returns the latest |
+| `limit` | int | No | Maximum number of rows (default: 200, min: 1, max: 5000) |
 
-**Exemple :**
+**Example:**
 
 ```bash
-# Dernier snapshot, filtre sur eastus
+# Latest snapshot, filtered on eastus
 curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates?region=eastus"
 
-# Snapshot spécifique
+# Specific snapshot
 curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates?job_id=abc-123"
 ```
 
-**Réponse :**
+**Response:**
 
 ```json
 {
@@ -130,21 +130,21 @@ curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates?job_id=abc-123"
 
 ### `GET /plugins/bdd-sku/spot/eviction-rates/history`
 
-Liste les **snapshots disponibles** des taux d'éviction. Chaque snapshot correspond à une exécution du collecteur (un `job_id` unique).
+Lists the **available snapshots** of eviction rates. Each snapshot corresponds to a collector execution (a unique `job_id`).
 
-**Paramètres query :**
+**Query parameters:**
 
-| Paramètre | Type | Requis | Description |
+| Parameter | Type | Required | Description |
 |---|---|---|---|
-| `limit` | int | Non | Nombre max de snapshots (défaut : 50, min : 1, max : 500) |
+| `limit` | int | No | Maximum number of snapshots (default: 50, min: 1, max: 500) |
 
-**Exemple :**
+**Example:**
 
 ```bash
 curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates/history"
 ```
 
-**Réponse :**
+**Response:**
 
 ```json
 {
@@ -168,24 +168,24 @@ curl "http://localhost:5001/plugins/bdd-sku/spot/eviction-rates/history"
 
 ### `GET /plugins/bdd-sku/spot/price-history`
 
-Historique des prix Spot VM (tableau de prix par SKU×région×OS).
+Spot VM price history (price array per SKU×region×OS).
 
-**Paramètres query :**
+**Query parameters:**
 
-| Paramètre | Type | Requis | Description |
+| Parameter | Type | Required | Description |
 |---|---|---|---|
-| `region` | string | Non | Filtre exact par région Azure |
-| `sku_name` | string | Non | Filtre substring insensible à la casse |
-| `os_type` | string | Non | Filtre par OS (`Linux` ou `Windows`) |
-| `limit` | int | Non | Nombre max de lignes (défaut : 200, min : 1, max : 5000) |
+| `region` | string | No | Exact filter by Azure region |
+| `sku_name` | string | No | Case-insensitive substring filter |
+| `os_type` | string | No | Filter by OS (`Linux` or `Windows`) |
+| `limit` | int | No | Maximum number of rows (default: 200, min: 1, max: 5000) |
 
-**Exemple :**
+**Example:**
 
 ```bash
 curl "http://localhost:5001/plugins/bdd-sku/spot/price-history?region=westeurope&os_type=Linux&sku_name=D4s"
 ```
 
-**Réponse :**
+**Response:**
 
 ```json
 {
@@ -206,54 +206,54 @@ curl "http://localhost:5001/plugins/bdd-sku/spot/price-history?region=westeurope
 
 ---
 
-## Outils MCP
+## MCP Tools
 
-Le plugin expose 4 outils sur le serveur MCP d'az-scout, utilisables par les LLMs dans le chat intégré.
+The plugin exposes 4 tools on the az-scout MCP server, usable by LLMs in the integrated chat.
 
-| Outil | Paramètres | Description |
+| Tool | Parameters | Description |
 |---|---|---|
-| `cache_status` | *(aucun)* | Statut de la base : connectivité, comptage par table, dernier run |
-| `get_spot_eviction_rates` | `region?`, `sku_name?`, `job_id?` | Taux d'éviction Spot. Sans `job_id` → dernier snapshot |
-| `get_spot_eviction_history` | *(aucun)* | Liste les snapshots d'éviction disponibles (50 derniers) |
-| `get_spot_price_history` | `region?`, `sku_name?`, `os_type?` | Historique des prix Spot par SKU×région×OS |
-| `v1_status` | *(aucun)* | Statut v1 : santé DB, stats par dataset |
-| `v1_list_locations` | `limit?`, `cursor?` | Lister les régions Azure (paginé) |
-| `v1_list_skus` | `search?`, `limit?`, `cursor?` | Lister les SKUs VM (paginé) |
-| `v1_retail_prices` | `region?`, `sku?`, `currency?`, `limit?`, `cursor?` | Prix retail VM (paginé) |
-| `v1_eviction_rates` | `region?`, `sku?`, `limit?`, `cursor?` | Taux d'éviction Spot (paginé) |
-| `v1_eviction_rates_latest` | `region?`, `sku?`, `limit?` | Dernier taux d'éviction par (region, sku) |
-| `v1_pricing_categories` | `limit?`, `cursor?` | Catégories de pricing distinctes (paginé) |
-| `v1_pricing_summary` | `region?`, `category?`, `priceType?`, `snapshotSince?`, `limit?`, `cursor?` | Résumés de prix agrégés (multi-valeur, paginé) |
-| `v1_pricing_summary_latest` | `region?`, `category?`, `priceType?`, `limit?`, `cursor?` | Résumés du dernier run (paginé) |
-| `v1_pricing_summary_series` | `region`, `priceType`, `bucket`, `metric?`, `category?` | Série temporelle d'une métrique de prix |
-| `v1_pricing_cheapest` | `priceType`, `metric?`, `category?`, `limit?` | Top N régions les moins chères |
-| `v1_sku_catalog` | `search?`, `category?`, `family?`, `min_vcpus?`, `max_vcpus?`, `limit?`, `cursor?` | Catalogue VM SKU complet (paginé) |
-| `v1_jobs` | `dataset?`, `status?`, `limit?`, `cursor?` | Job runs d'ingestion (paginé, plus récents d'abord) |
-| `v1_job_logs` | `run_id`, `level?`, `limit?`, `cursor?` | Logs d'un job run spécifique (paginé) |
-| `v1_spot_prices_series` | `region`, `sku`, `os_type?`, `bucket?` | Série temporelle prix Spot (JSONB dénormalisé) |
-| `v1_retail_prices_compare` | `sku`, `currency?`, `pricing_type?` | Comparer un SKU à travers toutes les régions |
-| `v1_spot_detail` | `region`, `sku`, `os_type?` | Détail Spot composite (prix + éviction + catalogue) |
-| `v1_savings_plans` | `region?`, `sku?`, `currency?`, `limit?`, `cursor?` | Prix retail avec données savings plan (paginé) |
-| `v1_pricing_summary_compare` | `regions`, `price_type?`, `category?` | Comparer résumés pricing entre régions |
-| `v1_stats` | *(aucun)* | Métriques globales du dashboard |
+| `cache_status` | *(none)* | Database status: connectivity, count per table, last run |
+| `get_spot_eviction_rates` | `region?`, `sku_name?`, `job_id?` | Spot eviction rates. Without `job_id` → latest snapshot |
+| `get_spot_eviction_history` | *(none)* | Lists available eviction snapshots (last 50) |
+| `get_spot_price_history` | `region?`, `sku_name?`, `os_type?` | Spot price history per SKU×region×OS |
+| `v1_status` | *(none)* | v1 status: DB health, stats per dataset |
+| `v1_list_locations` | `limit?`, `cursor?` | List Azure regions (paginated) |
+| `v1_list_skus` | `search?`, `limit?`, `cursor?` | List VM SKUs (paginated) |
+| `v1_retail_prices` | `region?`, `sku?`, `currency?`, `limit?`, `cursor?` | VM retail prices (paginated) |
+| `v1_eviction_rates` | `region?`, `sku?`, `limit?`, `cursor?` | Spot eviction rates (paginated) |
+| `v1_eviction_rates_latest` | `region?`, `sku?`, `limit?` | Latest eviction rate per (region, sku) |
+| `v1_pricing_categories` | `limit?`, `cursor?` | Distinct pricing categories (paginated) |
+| `v1_pricing_summary` | `region?`, `category?`, `priceType?`, `snapshotSince?`, `limit?`, `cursor?` | Aggregated price summaries (multi-value, paginated) |
+| `v1_pricing_summary_latest` | `region?`, `category?`, `priceType?`, `limit?`, `cursor?` | Summaries from latest run (paginated) |
+| `v1_pricing_summary_series` | `region`, `priceType`, `bucket`, `metric?`, `category?` | Time series of a price metric |
+| `v1_pricing_cheapest` | `priceType`, `metric?`, `category?`, `limit?` | Top N cheapest regions |
+| `v1_sku_catalog` | `search?`, `category?`, `family?`, `min_vcpus?`, `max_vcpus?`, `limit?`, `cursor?` | Full VM SKU catalog (paginated) |
+| `v1_jobs` | `dataset?`, `status?`, `limit?`, `cursor?` | Ingestion job runs (paginated, most recent first) |
+| `v1_job_logs` | `run_id`, `level?`, `limit?`, `cursor?` | Logs for a specific job run (paginated) |
+| `v1_spot_prices_series` | `region`, `sku`, `os_type?`, `bucket?` | Spot price time series (denormalized JSONB) |
+| `v1_retail_prices_compare` | `sku`, `currency?`, `pricing_type?` | Compare a SKU across all regions |
+| `v1_spot_detail` | `region`, `sku`, `os_type?` | Composite Spot detail (price + eviction + catalog) |
+| `v1_savings_plans` | `region?`, `sku?`, `currency?`, `limit?`, `cursor?` | Retail prices with savings plan data (paginated) |
+| `v1_pricing_summary_compare` | `regions`, `price_type?`, `category?` | Compare pricing summaries between regions |
+| `v1_stats` | *(none)* | Global dashboard metrics |
 
 ---
 
-## API v1 — Read-only (cursor-paginated)
+## v1 API — Read-only (cursor-paginated)
 
-L'API v1 est montée sous `/plugins/bdd-sku/v1/` et offre un accès en lecture seule
-aux données PostgreSQL via une pagination par curseur (keyset) haute performance.
+The v1 API is mounted under `/plugins/bdd-sku/v1/` and provides read-only access
+to PostgreSQL data via high-performance keyset (cursor) pagination.
 
 **Base path :** `/plugins/bdd-sku/v1`
 
 ### Pagination
 
-Tous les endpoints paginés utilisent la **pagination keyset** :
-- `limit` : nombre d'items par page (1–5000, défaut 1000)
-- `cursor` : token opaque (base64url) renvoyé dans la réponse `page.cursor`
-- `page.hasMore` : `true` si une page suivante existe
+All paginated endpoints use **keyset pagination**:
+- `limit`: number of items per page (1–5000, default 1000)
+- `cursor`: opaque token (base64url) returned in the response `page.cursor`
+- `page.hasMore`: `true` if a next page exists
 
-Pour parcourir toutes les pages :
+To iterate through all pages:
 ```bash
 # Page 1
 curl ".../v1/locations?limit=100"
@@ -262,9 +262,9 @@ curl ".../v1/locations?limit=100"
 curl ".../v1/locations?limit=100&cursor=eyJuYW1lIjoi..."
 ```
 
-### Contrat JSON
+### JSON Contract
 
-Toute réponse 2xx suit la structure `ListResponse<T>` :
+All 2xx responses follow the `ListResponse<T>` structure:
 
 ```json
 {
@@ -274,7 +274,7 @@ Toute réponse 2xx suit la structure `ListResponse<T>` :
 }
 ```
 
-Les erreurs suivent `ErrorResponse` :
+Errors follow `ErrorResponse`:
 
 ```json
 {
@@ -283,149 +283,149 @@ Les erreurs suivent `ErrorResponse` :
 }
 ```
 
-### Endpoints v1
+### v1 Endpoints
 
-| # | Endpoint | Méthode | Paginé | Description |
+| # | Endpoint | Method | Paginated | Description |
 |---|---|---|---|---|
-| 1 | `/v1/status` | GET | Non | Santé DB, stats par dataset, version API |
-| 2 | `/v1/locations` | GET | Oui | Noms de régions distincts (union 3 tables) |
-| 3 | `/v1/skus` | GET | Oui | Noms de SKUs distincts (filtre `search` ILIKE) |
-| 4 | `/v1/currencies` | GET | Oui | Codes devise distincts (retail) |
-| 5 | `/v1/os-types` | GET | Oui | Types OS distincts (spot) |
-| 6 | `/v1/retail/prices` | GET | Oui | Prix retail avec filtres (region, sku, currency, effectiveAt, updatedSince) |
-| 7 | `/v1/retail/prices/latest` | GET | Oui | Dernier snapshot retail par clé unique |
-| 8 | `/v1/spot/prices` | GET | Oui | Historique prix Spot (sample=raw uniquement, sinon 501) |
-| 9 | `/v1/spot/eviction-rates` | GET | Oui | Taux d'éviction Spot (filtres region, sku, updatedSince) |
-| 10 | `/v1/spot/eviction-rates/series` | GET | Non | Série temporelle agrégée (bucket=hour\|day\|week, agg=avg\|min\|max) |
-| 11 | `/v1/spot/eviction-rates/latest` | GET | Non | Dernier taux par (region, sku) |
-| 12 | `/v1/pricing/categories` | GET | Oui | Catégories de pricing distinctes |
-| 13 | `/v1/pricing/summary` | GET | Oui | Résumés agrégés (multi-valeur : region, category, priceType) |
-| 14 | `/v1/pricing/summary/latest` | GET | Oui | Résumés du dernier run d'agrégation |
-| 15 | `/v1/pricing/summary/series` | GET | Non | Série temporelle (bucket=day\|week\|month, metric=avg\|median\|…) |
-| 16 | `/v1/pricing/summary/cheapest` | GET | Non | Top N régions les moins chères (dernier run) |
-| 17 | `/v1/skus/catalog` | GET | Oui | Catalogue VM SKU complet (catégorie, famille, vCPU, mémoire…) |
-| 18 | `/v1/jobs` | GET | Oui | Job runs d'ingestion (plus récents d'abord) |
-| 19 | `/v1/jobs/{run_id}/logs` | GET | Oui | Logs d'un job run spécifique |
-| 20 | `/v1/spot/prices/series` | GET | Non | Série temporelle prix Spot (JSONB dénormalisé, bucket=day\|week\|month) |
-| 21 | `/v1/retail/prices/compare` | GET | Non | Comparer un SKU à travers toutes les régions |
-| 22 | `/v1/spot/detail` | GET | Non | Détail Spot composite (prix + éviction + catalogue SKU) |
-| 23 | `/v1/retail/savings-plans` | GET | Oui | Prix retail avec données savings plan |
-| 24 | `/v1/pricing/summary/compare` | GET | Non | Comparer résumés de prix entre régions |
-| 25 | `/v1/stats` | GET | Non | Métriques globales : comptage tables, régions, SKUs, fraîcheur |
+| 1 | `/v1/status` | GET | No | DB health, stats per dataset, API version |
+| 2 | `/v1/locations` | GET | Yes | Distinct region names (union of 3 tables) |
+| 3 | `/v1/skus` | GET | Yes | Distinct SKU names (`search` ILIKE filter) |
+| 4 | `/v1/currencies` | GET | Yes | Distinct currency codes (retail) |
+| 5 | `/v1/os-types` | GET | Yes | Distinct OS types (spot) |
+| 6 | `/v1/retail/prices` | GET | Yes | Retail prices with filters (region, sku, currency, effectiveAt, updatedSince) |
+| 7 | `/v1/retail/prices/latest` | GET | Yes | Latest retail snapshot per unique key |
+| 8 | `/v1/spot/prices` | GET | Yes | Spot price history (sample=raw only, otherwise 501) |
+| 9 | `/v1/spot/eviction-rates` | GET | Yes | Spot eviction rates (filters: region, sku, updatedSince) |
+| 10 | `/v1/spot/eviction-rates/series` | GET | No | Aggregated time series (bucket=hour\|day\|week, agg=avg\|min\|max) |
+| 11 | `/v1/spot/eviction-rates/latest` | GET | No | Latest rate per (region, sku) |
+| 12 | `/v1/pricing/categories` | GET | Yes | Distinct pricing categories |
+| 13 | `/v1/pricing/summary` | GET | Yes | Aggregated summaries (multi-value: region, category, priceType) |
+| 14 | `/v1/pricing/summary/latest` | GET | Yes | Summaries from latest aggregation run |
+| 15 | `/v1/pricing/summary/series` | GET | No | Time series (bucket=day\|week\|month, metric=avg\|median\|…) |
+| 16 | `/v1/pricing/summary/cheapest` | GET | No | Top N cheapest regions (latest run) |
+| 17 | `/v1/skus/catalog` | GET | Yes | Full VM SKU catalog (category, family, vCPU, memory…) |
+| 18 | `/v1/jobs` | GET | Yes | Ingestion job runs (most recent first) |
+| 19 | `/v1/jobs/{run_id}/logs` | GET | Yes | Logs for a specific job run |
+| 20 | `/v1/spot/prices/series` | GET | No | Spot price time series (denormalized JSONB, bucket=day\|week\|month) |
+| 21 | `/v1/retail/prices/compare` | GET | No | Compare a SKU across all regions |
+| 22 | `/v1/spot/detail` | GET | No | Composite Spot detail (price + eviction + SKU catalog) |
+| 23 | `/v1/retail/savings-plans` | GET | Yes | Retail prices with savings plan data |
+| 24 | `/v1/pricing/summary/compare` | GET | No | Compare price summaries between regions |
+| 25 | `/v1/stats` | GET | No | Global metrics: table counts, regions, SKUs, data freshness |
 
-### Exemples curl
+### curl Examples
 
 ```bash
 # Status
 curl "http://localhost:5001/plugins/bdd-sku/v1/status"
 
-# Prix retail (100 premiers en USD, region eastus)
+# Retail prices (first 100 in USD, region eastus)
 curl "http://localhost:5001/plugins/bdd-sku/v1/retail/prices?region=eastus&currency=USD&limit=100"
 
-# Taux d'éviction mis à jour depuis 24h
+# Eviction rates updated in the last 24h
 curl "http://localhost:5001/plugins/bdd-sku/v1/spot/eviction-rates?updatedSince=2026-03-01T00:00:00Z&limit=500"
 
-# Série éviction horaire pour un SKU
+# Hourly eviction series for a SKU
 curl "http://localhost:5001/plugins/bdd-sku/v1/spot/eviction-rates/series?region=eastus&sku=Standard_D2s_v3&bucket=hour"
 
 # Prix Spot (raw)
 curl "http://localhost:5001/plugins/bdd-sku/v1/spot/prices?region=westeurope&sku=Standard_D4s_v3"
 
-# Catégories pricing
+# Pricing categories
 curl "http://localhost:5001/plugins/bdd-sku/v1/pricing/categories?limit=50"
 
-# Résumés pricing (multi-valeur region + priceType)
+# Pricing summaries (multi-value region + priceType)
 curl "http://localhost:5001/plugins/bdd-sku/v1/pricing/summary?region=eastus&region=westeurope&priceType=spot&limit=100"
 
-# Dernier run pricing
+# Latest pricing run
 curl "http://localhost:5001/plugins/bdd-sku/v1/pricing/summary/latest?priceType=retail"
 
-# Série temporelle médiane, bucket mensuel
+# Median time series, monthly bucket
 curl "http://localhost:5001/plugins/bdd-sku/v1/pricing/summary/series?region=eastus&priceType=spot&bucket=month&metric=median"
 
-# Top 5 régions les moins chères
+# Top 5 cheapest regions
 curl "http://localhost:5001/plugins/bdd-sku/v1/pricing/summary/cheapest?priceType=spot&metric=median&limit=5"
 
-# Catalogue SKU (filtré par catégorie)
+# SKU catalog (filtered by category)
 curl "http://localhost:5001/plugins/bdd-sku/v1/skus/catalog?category=General%20purpose&limit=50"
 
-# Jobs d'ingestion (erreurs seulement)
+# Ingestion jobs (errors only)
 curl "http://localhost:5001/plugins/bdd-sku/v1/jobs?status=error"
 
-# Logs d'un job
+# Job logs
 curl "http://localhost:5001/plugins/bdd-sku/v1/jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/logs?level=error"
 
-# Série prix Spot (bucket mensuel)
+# Spot price series (monthly bucket)
 curl "http://localhost:5001/plugins/bdd-sku/v1/spot/prices/series?region=eastus&sku=Standard_D2s_v3&bucket=month"
 
-# Comparer un SKU entre régions
+# Compare a SKU across regions
 curl "http://localhost:5001/plugins/bdd-sku/v1/retail/prices/compare?sku=Standard_D2s_v3&currency=USD"
 
-# Détail Spot composite
+# Composite Spot detail
 curl "http://localhost:5001/plugins/bdd-sku/v1/spot/detail?region=eastus&sku=Standard_D2s_v3"
 
 # Savings plans
 curl "http://localhost:5001/plugins/bdd-sku/v1/retail/savings-plans?region=eastus&limit=100"
 
-# Comparer pricing entre régions
+# Compare pricing between regions
 curl "http://localhost:5001/plugins/bdd-sku/v1/pricing/summary/compare?regions=eastus&regions=westeurope&priceType=spot"
 
-# Stats globales
+# Global stats
 curl "http://localhost:5001/plugins/bdd-sku/v1/stats"
 ```
 
-> **Note :** `spot/prices` renvoie `price_history` tel quel (JSONB). Les paramètres `from`/`to` filtrent sur `job_datetime` (snapshot). Le mode `sample=hourly|daily` n'est pas encore implémenté (renvoie 501).
+> **Note:** `spot/prices` returns `price_history` as-is (JSONB). The `from`/`to` parameters filter on `job_datetime` (snapshot). The `sample=hourly|daily` mode is not yet implemented (returns 501).
 
-### Spécification OpenAPI
+### OpenAPI Specification
 
-La spécification complète se trouve dans [`openapi/v1.yaml`](openapi/v1.yaml) (OpenAPI 3.0.3).
+The full specification is available at [`openapi/v1.yaml`](openapi/v1.yaml) (OpenAPI 3.0.3).
 
 ---
 
-## Prérequis
+## Prerequisites
 
 - Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (gestionnaire de paquets)
+- [uv](https://docs.astral.sh/uv/) (package manager)
 - Docker & Docker Compose
-- [az-scout](https://github.com/lrivallain/az-scout) installé (`uv pip install az-scout` ou en mode dev)
+- [az-scout](https://github.com/lrivallain/az-scout) installed (`uv pip install az-scout` or in dev mode)
 
 ---
 
-## Lancement local
+## Local Setup
 
-### 1. Démarrer PostgreSQL
+### 1. Start PostgreSQL
 
 ```bash
 cd postgresql/
 docker compose up -d
 ```
 
-Cela démarre un conteneur PostgreSQL 17 avec :
-- **Base** : `azscout`, **user** : `azscout`, **password** : `azscout`
-- **Port** : `localhost:5432`
-- Le schéma (`sql/schema.sql`) est appliqué automatiquement au premier démarrage
+This starts a PostgreSQL 17 container with:
+- **Database**: `azscout`, **user**: `azscout`, **password**: `azscout`
+- **Port**: `localhost:5432`
+- The schema (`sql/schema.sql`) is applied automatically on first startup
 
-Vérifier que Postgres est prêt :
+Verify that Postgres is ready:
 
 ```bash
 docker compose ps           # State: running (healthy)
 docker compose logs postgres  # ... database system is ready to accept connections
 ```
 
-### 2. Installer le plugin en mode développement
+### 2. Install the plugin in development mode
 
 ```bash
-# Depuis la racine du repo
+# From the repo root
 uv pip install -e ".[dev]"
 ```
 
-Le plugin est découvert automatiquement par az-scout grâce à l'entry point `az_scout.plugins` dans `pyproject.toml`.
+The plugin is automatically discovered by az-scout thanks to the `az_scout.plugins` entry point in `pyproject.toml`.
 
-### 3. (Optionnel) Configurer la connexion PostgreSQL
+### 3. (Optional) Configure the PostgreSQL connection
 
-Par défaut, le plugin se connecte à `localhost:5432/azscout` (user/pass: `azscout`). Pour personnaliser :
+By default, the plugin connects to `localhost:5432/azscout` (user/pass: `azscout`). To customize:
 
-Créer `~/.config/az-scout/bdd-sku.toml` :
+Create `~/.config/az-scout/bdd-sku.toml`:
 
 ```toml
 [database]
@@ -437,31 +437,31 @@ password = "azscout"
 sslmode = "disable"
 ```
 
-Ou pointer vers un fichier custom :
+Or point to a custom file:
 
 ```bash
 export AZ_SCOUT_BDD_SKU_CONFIG=/chemin/vers/mon/config.toml
 ```
 
-### 4. Lancer az-scout
+### 4. Start az-scout
 
 ```bash
 uv run az-scout web --host 0.0.0.0 --port 5001 --reload --no-open -v
 ```
 
-Ouvrir http://localhost:5001 — l'onglet **SKU DB Cache** apparaît dans la barre de navigation.
+Open http://localhost:5001 — the **SKU DB Cache** tab appears in the navigation bar.
 
-### 5. Alimenter la base (ingestion)
+### 5. Populate the database (ingestion)
 
-L'ingestion est un **job Docker one-shot** séparé :
+Ingestion is a separate **one-shot Docker job**:
 
 ```bash
 cd ingestion/
 
-# Construire l'image
+# Build the image
 docker build -t bdd-sku-ingestion .
 
-# Lancer l'ingestion
+# Run the ingestion
 docker run --rm \
   --network postgresql_default \
   -e POSTGRES_HOST=postgres \
@@ -469,35 +469,35 @@ docker run --rm \
   bdd-sku-ingestion
 ```
 
-> **Note :** `--network postgresql_default` permet au container d'atteindre le Postgres du `docker compose`. Le nom du réseau peut varier — vérifier avec `docker network ls`.
+> **Note:** `--network postgresql_default` allows the container to reach the Postgres from `docker compose`. The network name may vary — verify with `docker network ls`.
 
-#### Variables d'environnement de l'ingestion
+#### Ingestion environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `POSTGRES_HOST` | `localhost` | Hôte PostgreSQL |
-| `POSTGRES_PORT` | `5432` | Port PostgreSQL |
-| `POSTGRES_DB` | `azscout` | Nom de la base |
-| `POSTGRES_USER` | `azscout` | Utilisateur |
-| `POSTGRES_PASSWORD` | `azscout` | Mot de passe |
-| `POSTGRES_SSLMODE` | `disable` | Mode SSL (`disable`, `require`, `verify-full`) |
-| `ENABLE_AZURE_PRICING_COLLECTOR` | `false` | Activer le collecteur de prix retail |
-| `AZURE_PRICING_MAX_ITEMS` | `-1` | Limite d'items pricing (-1 = illimité) |
-| `AZURE_PRICING_API_RETRY_ATTEMPTS` | `3` | Nombre de tentatives en cas d'erreur API pricing |
-| `AZURE_PRICING_API_RETRY_DELAY` | `2.0` | Délai entre retries pricing (secondes) |
-| `AZURE_PRICING_FILTERS` | `{}` | Filtres OData JSON (ex: `{"serviceName": "Virtual Machines"}`) |
-| `ENABLE_AZURE_SPOT_COLLECTOR` | `false` | Activer le collecteur Spot (éviction + prix) |
-| `AZURE_SPOT_EVICTION_ONLY` | `false` | Mode éviction uniquement (skip l'historique des prix Spot) |
-| `AZURE_SPOT_MAX_ITEMS` | `-1` | Limite d'items spot (-1 = illimité) |
-| `AZURE_SPOT_API_RETRY_ATTEMPTS` | `3` | Nombre de tentatives en cas d'erreur API spot |
-| `AZURE_SPOT_API_RETRY_DELAY` | `2.0` | Délai entre retries spot (secondes) |
-| `LOG_LEVEL` | `INFO` | Niveau de log (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `JOB_TYPE` | `manual` | Type de job (metadata) |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `azscout` | Database name |
+| `POSTGRES_USER` | `azscout` | User |
+| `POSTGRES_PASSWORD` | `azscout` | Password |
+| `POSTGRES_SSLMODE` | `disable` | SSL mode (`disable`, `require`, `verify-full`) |
+| `ENABLE_AZURE_PRICING_COLLECTOR` | `false` | Enable the retail pricing collector |
+| `AZURE_PRICING_MAX_ITEMS` | `-1` | Pricing item limit (-1 = unlimited) |
+| `AZURE_PRICING_API_RETRY_ATTEMPTS` | `3` | Number of retries on pricing API error |
+| `AZURE_PRICING_API_RETRY_DELAY` | `2.0` | Delay between pricing retries (seconds) |
+| `AZURE_PRICING_FILTERS` | `{}` | OData JSON filters (e.g. `{"serviceName": "Virtual Machines"}`) |
+| `ENABLE_AZURE_SPOT_COLLECTOR` | `false` | Enable the Spot collector (eviction + prices) |
+| `AZURE_SPOT_EVICTION_ONLY` | `false` | Eviction-only mode (skip Spot price history) |
+| `AZURE_SPOT_MAX_ITEMS` | `-1` | Spot item limit (-1 = unlimited) |
+| `AZURE_SPOT_API_RETRY_ATTEMPTS` | `3` | Number of retries on Spot API error |
+| `AZURE_SPOT_API_RETRY_DELAY` | `2.0` | Delay between Spot retries (seconds) |
+| `LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `JOB_TYPE` | `manual` | Job type (metadata) |
 
-#### Exemple avec filtres
+#### Example with filters
 
 ```bash
-# Collecte pricing avec filtres
+# Pricing collection with filters
 docker run --rm \
   --network postgresql_default \
   -e POSTGRES_HOST=postgres \
@@ -507,14 +507,14 @@ docker run --rm \
   -e LOG_LEVEL=DEBUG \
   bdd-sku-ingestion
 
-# Collecte spot (éviction + prix) — nécessite des credentials Azure
+# Spot collection (eviction + prices) — requires Azure credentials
 docker run --rm \
   --network postgresql_default \
   -e POSTGRES_HOST=postgres \
   -e ENABLE_AZURE_SPOT_COLLECTOR=true \
   bdd-sku-ingestion
 
-# Collecte éviction uniquement (mode historisation horaire)
+# Eviction only (hourly historization mode)
 docker run --rm \
   --network postgresql_default \
   -e POSTGRES_HOST=postgres \
@@ -523,13 +523,13 @@ docker run --rm \
   bdd-sku-ingestion
 ```
 
-### 6. Vérifier le statut
+### 6. Check the status
 
-- **UI** : Onglet SKU DB Cache → cliquer "Refresh Status"
-- **API** : `curl http://localhost:5001/plugins/bdd-sku/status`
-- **MCP** : L'outil `cache_status` est exposé automatiquement sur le serveur MCP
+- **UI**: SKU DB Cache tab → click "Refresh Status"
+- **API**: `curl http://localhost:5001/plugins/bdd-sku/status`
+- **MCP**: The `cache_status` tool is automatically exposed on the MCP server
 
-La réponse `/status` :
+The `/status` response:
 
 ```json
 {
@@ -551,79 +551,79 @@ La réponse `/status` :
 
 ---
 
-## Déploiement sur Azure (Terraform)
+## Azure Deployment (Terraform)
 
-L'infrastructure Azure est définie dans le dossier `infra/` et se déploie avec Terraform. Elle crée :
+The Azure infrastructure is defined in the `infra/` folder and is deployed with Terraform. It creates:
 
 - **Azure Database for PostgreSQL – Flexible Server** (Burstable, PostgreSQL 17)
-- **Azure Container Registry** (Basic) pour stocker l'image d'ingestion
-- **Azure Container Apps Environment** avec Log Analytics
-- **3 Container Apps Jobs** :
-  - `{prefix}-sched` — cron quotidien (02:00 UTC) : collecte complète (pricing + spot)
-  - `{prefix}-spot-evict` — cron horaire : éviction uniquement (historisation)
-  - `{prefix}-manual` — déclenchement manuel à la demande
-- **1 Container Apps Job – SKU Mapper** :
-  - `sku-mapper-job` — cron quotidien (04:00 UTC) : enrichit `vm_sku_catalog` à partir des SKUs collectés
+- **Azure Container Registry** (Basic) to store the ingestion image
+- **Azure Container Apps Environment** with Log Analytics
+- **3 Container Apps Jobs**:
+  - `{prefix}-sched` — daily cron (02:00 UTC): full collection (pricing + spot)
+  - `{prefix}-spot-evict` — hourly cron: eviction only (historization)
+  - `{prefix}-manual` — on-demand manual trigger
+- **1 Container Apps Job – SKU Mapper**:
+  - `sku-mapper-job` — daily cron (04:00 UTC): enriches `vm_sku_catalog` from collected SKUs
 
-### Jobs d'ingestion
+### Ingestion Jobs
 
-| Job | Cron | Collecteurs | CPU/Mém | Timeout |
+| Job | Cron | Collectors | CPU/Mem | Timeout |
 |---|---|---|---|---|
-| **Scheduled** (`-sched`) | `0 2 * * *` (02:00 UTC) | pricing + spot (éviction + prix) | 1 CPU / 2 Gi | 3600s |
-| **Spot Eviction Hourly** (`-spot-evict`) | `0 * * * *` (chaque heure) | spot éviction uniquement | 0.5 CPU / 1 Gi | 900s |
+| **Scheduled** (`-sched`) | `0 2 * * *` (02:00 UTC) | pricing + spot (eviction + prices) | 1 CPU / 2 Gi | 3600s |
+| **Spot Eviction Hourly** (`-spot-evict`) | `0 * * * *` (every hour) | spot eviction only | 0.5 CPU / 1 Gi | 900s |
 | **Manual** (`-manual`) | On-demand | pricing + spot | 1 CPU / 2 Gi | 21600s |
-| **SKU Mapper** (`sku-mapper-job`) | `0 4 * * *` (04:00 UTC) | parse & enrichit `vm_sku_catalog` | 0.25 CPU / 0.5 Gi | 600s |
+| **SKU Mapper** (`sku-mapper-job`) | `0 4 * * *` (04:00 UTC) | parse & enrich `vm_sku_catalog` | 0.25 CPU / 0.5 Gi | 600s |
 
-Le job horaire (`spot-evict`) lance le collecteur Spot avec `AZURE_SPOT_EVICTION_ONLY=true`, ce qui ne collecte que les ~11 000 taux d'éviction sans requêter l'historique des prix (~243 000 lignes). Chaque exécution crée un nouveau snapshot dans `spot_eviction_rates` (identifié par `job_id`), permettant de suivre l'évolution des taux d'éviction dans le temps.
+The hourly job (`spot-evict`) runs the Spot collector with `AZURE_SPOT_EVICTION_ONLY=true`, collecting only the ~11,000 eviction rates without querying the price history (~243,000 rows). Each execution creates a new snapshot in `spot_eviction_rates` (identified by `job_id`), allowing you to track eviction rate evolution over time.
 
-Le job **SKU Mapper** (`sku-mapper-job`) tourne à 04:00 UTC, après la fin de l'ingestion (02:00 UTC). Il lit tous les noms de SKUs distincts depuis les 3 tables de données (`retail_prices_vm`, `spot_eviction_rates`, `spot_price_history`), parse la convention de nommage `Standard_…` via regex pour extraire famille, série, version et nombre de vCPUs, puis upsert les résultats dans `vm_sku_catalog`. Le job est idempotent et utilise l'authentification par mot de passe (comme les jobs d'ingestion).
+The **SKU Mapper** job (`sku-mapper-job`) runs at 04:00 UTC, after ingestion completes (02:00 UTC). It reads all distinct SKU names from the 3 data tables (`retail_prices_vm`, `spot_eviction_rates`, `spot_price_history`), parses the `Standard_…` naming convention via regex to extract family, series, version, and vCPU count, then upserts the results into `vm_sku_catalog`. The job is idempotent and uses password authentication (like the ingestion jobs).
 
-### 1. Prérequis
+### 1. Prerequisites
 
 - [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
-- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) connecté (`az login`)
-- Un abonnement Azure avec les droits suffisants
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) logged in (`az login`)
+- An Azure subscription with sufficient permissions
 
 ### 2. Configuration
 
 ```bash
 cd infra/
 
-# Copier le fichier d'exemple et remplir vos valeurs
+# Copy the example file and fill in your values
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Éditer `terraform.tfvars` — au minimum renseigner :
+Edit `terraform.tfvars` — at minimum provide:
 
 | Variable | Description |
 |---|---|
-| `subscription_id` | ID de votre abonnement Azure |
-| `postgres_admin_password` | Mot de passe fort pour le serveur PostgreSQL |
+| `subscription_id` | Your Azure subscription ID |
+| `postgres_admin_password` | Strong password for the PostgreSQL server |
 
-### 3. Déployer
+### 3. Deploy
 
 ```bash
 terraform init
-terraform plan        # Vérifier les ressources qui seront créées
-terraform apply       # Confirmer avec 'yes'
+terraform plan        # Review resources that will be created
+terraform apply       # Confirm with 'yes'
 ```
 
-### 4. Construire et pousser les images
+### 4. Build and push images
 
-Après le déploiement, construire les images dans l'ACR :
+After deployment, build the images in ACR:
 
 ```bash
-# Récupérer le nom du registre
+# Get the registry name
 ACR_NAME=$(terraform output -raw container_registry_login_server)
 
-# Image d'ingestion
+# Ingestion image
 az acr build --registry ${ACR_NAME%%.*} --image bdd-sku-ingestion:latest ../ingestion/
 
-# Image du SKU Mapper
+# SKU Mapper image
 az acr build --registry ${ACR_NAME%%.*} --image sku-mapper-job:latest ../sku-mapper-job/
 ```
 
-### 5. Appliquer le schéma PostgreSQL
+### 5. Apply the PostgreSQL schema
 
 ```bash
 PG_FQDN=$(terraform output -raw postgresql_fqdn)
@@ -632,7 +632,7 @@ psql "host=$PG_FQDN port=5432 dbname=azscout user=azscout sslmode=require" \
   -f ../sql/schema.sql
 ```
 
-### 6. Déclencher un job manuel (optionnel)
+### 6. Trigger a manual job (optional)
 
 ```bash
 az containerapp job start \
@@ -640,19 +640,19 @@ az containerapp job start \
   --name $(terraform output -raw pricing_manual_job_name)
 ```
 
-### 7. Détruire l'infrastructure
+### 7. Destroy the infrastructure
 
 ```bash
 terraform destroy     # Confirmer avec 'yes'
 ```
 
-> **Note :** `terraform.tfvars` contient des secrets (mot de passe PostgreSQL). Ce fichier est ignoré par `.gitignore` et ne doit **jamais** être committé.
+> **Note:** `terraform.tfvars` contains secrets (PostgreSQL password). This file is ignored by `.gitignore` and should **never** be committed.
 
 ---
 
 ## API Standalone (Container App)
 
-L'API standalone est un conteneur FastAPI autonome (`api/`) qui expose **tous les endpoints** (legacy + v1) directement en HTTPS, sans dépendre d'az-scout. Il tourne 24/7 dans Azure Container Apps avec auto-scaling.
+The standalone API is a self-contained FastAPI container (`api/`) that exposes **all endpoints** (legacy + v1) directly over HTTPS, without depending on az-scout. It runs 24/7 in Azure Container Apps with auto-scaling.
 
 ### Architecture
 
@@ -685,63 +685,63 @@ Internet
 
 ```
 api/
-├── Dockerfile         # Image Python 3.12-slim, PYTHONPATH=/app/src
-├── main.py            # FastAPI app avec lifespan (pool DB), CORS, /health
+├── Dockerfile         # Python 3.12-slim image, PYTHONPATH=/app/src
+├── main.py            # FastAPI app with lifespan (DB pool), CORS, /health
 └── requirements.txt   # fastapi, uvicorn, psycopg, psycopg_pool, azure-identity
 ```
 
-`api/main.py` importe directement le `router` du plugin (`az_scout_bdd_sku.routes`) — les mêmes endpoints, sans passer par az-scout.
+`api/main.py` directly imports the plugin's `router` (`az_scout_bdd_sku.routes`) — the same endpoints, without going through az-scout.
 
-### Endpoints disponibles
+### Available Endpoints
 
-| Catégorie | Endpoints | Préfixe |
+| Category | Endpoints | Prefix |
 |---|---|---|
 | Infra | `/health` | — |
 | Legacy (4) | `/status`, `/spot/eviction-rates`, `/spot/eviction-rates/history`, `/spot/price-history` | — |
 | v1 (16) | `/v1/status`, `/v1/locations`, `/v1/skus`, `/v1/currencies`, `/v1/os-types`, `/v1/retail/prices`, `/v1/retail/prices/latest`, `/v1/spot/prices`, `/v1/spot/eviction-rates`, `/v1/spot/eviction-rates/series`, `/v1/spot/eviction-rates/latest`, `/v1/pricing/categories`, `/v1/pricing/summary`, `/v1/pricing/summary/latest`, `/v1/pricing/summary/series`, `/v1/pricing/summary/cheapest` | — |
 
-> **Note :** En mode standalone, les routes sont montées à la racine (pas sous `/plugins/bdd-sku/`).
+> **Note:** In standalone mode, routes are mounted at the root (not under `/plugins/bdd-sku/`).
 
-### Build & déploiement
+### Build & Deployment
 
 ```bash
-# Construire l'image dans l'ACR (depuis la racine du repo)
+# Build the image in ACR (from the repo root)
 az acr build --registry azscoutacr --image bdd-sku-api:latest \
   --platform linux/amd64 --file api/Dockerfile .
 
-# Le Container App pull automatiquement la dernière image au redémarrage
-# Pour forcer une mise à jour :
+# The Container App automatically pulls the latest image on restart
+# To force an update:
 az containerapp update --name azscout-api --resource-group rg-azure-scout-bdd \
   --image azscoutacr.azurecr.io/bdd-sku-api:latest
 ```
 
-### Configuration (variables d'environnement)
+### Configuration (environment variables)
 
-| Variable | Valeur | Description |
+| Variable | Value | Description |
 |---|---|---|
-| `POSTGRES_HOST` | FQDN du serveur PG | Hôte PostgreSQL |
-| `POSTGRES_PORT` | `5432` | Port PostgreSQL |
-| `POSTGRES_DB` | `azscout` | Nom de la base |
-| `POSTGRES_USER` | Nom de la MSI | Utilisateur PG (= nom de l'identité managée) |
-| `POSTGRES_SSLMODE` | `require` | Mode SSL |
-| `POSTGRES_AUTH_METHOD` | `msi` | Mode d'authentification (`password` ou `msi`) |
-| `AZURE_CLIENT_ID` | Client ID de la MSI | Pour `DefaultAzureCredential` (user-assigned identity) |
-| `PYTHONUNBUFFERED` | `1` | Logs temps réel |
+| `POSTGRES_HOST` | PG server FQDN | PostgreSQL host |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `azscout` | Database name |
+| `POSTGRES_USER` | MSI name | PG user (= managed identity name) |
+| `POSTGRES_SSLMODE` | `require` | SSL mode |
+| `POSTGRES_AUTH_METHOD` | `msi` | Authentication mode (`password` or `msi`) |
+| `AZURE_CLIENT_ID` | MSI client ID | For `DefaultAzureCredential` (user-assigned identity) |
+| `PYTHONUNBUFFERED` | `1` | Real-time logs |
 
 ### Auto-scaling
 
-Le Container App est configuré avec :
-- **Min replicas** : 1 (toujours disponible)
-- **Max replicas** : 10
-- **Règle HTTP** : scale-out à 50 requêtes concurrentes par replica
+The Container App is configured with:
+- **Min replicas**: 1 (always available)
+- **Max replicas**: 10
+- **HTTP rule**: scale-out at 50 concurrent requests per replica
 
 ---
 
 ## Authentification Managed Identity (MSI)
 
-L'API standalone et les jobs d'ingestion utilisent une **Managed Identity (User-Assigned)** pour se connecter à PostgreSQL sans mot de passe.
+The standalone API and ingestion jobs use a **Managed Identity (User-Assigned)** to connect to PostgreSQL without a password.
 
-### Principe
+### How It Works
 
 ```
 Container App        DefaultAzureCredential        PostgreSQL
@@ -759,14 +759,14 @@ Container App        DefaultAzureCredential        PostgreSQL
     │ ◂──────────────────────────────────────────────── │
 ```
 
-1. `DefaultAzureCredential` acquiert un token OAuth2 avec le scope `https://ossrdbms-aad.database.windows.net/.default`
-2. Le token est passé comme **password** dans la connexion PostgreSQL
-3. PostgreSQL valide le token via Entra ID
-4. L'utilisateur PG est le **nom de la Managed Identity** (pas un login classique)
+1. `DefaultAzureCredential` acquires an OAuth2 token with scope `https://ossrdbms-aad.database.windows.net/.default`
+2. The token is passed as the **password** in the PostgreSQL connection
+3. PostgreSQL validates the token via Entra ID
+4. The PG user is the **Managed Identity name** (not a traditional login)
 
-### Configuration côté Azure
+### Azure-side Configuration
 
-#### 1. Activer l'authentification Entra ID sur PostgreSQL
+#### 1. Enable Entra ID authentication on PostgreSQL
 
 ```bash
 az postgres flexible-server update \
@@ -776,7 +776,7 @@ az postgres flexible-server update \
   --password-auth Enabled
 ```
 
-#### 2. Ajouter la MSI comme administrateur Entra
+#### 2. Add the MSI as an Entra administrator
 
 ```bash
 az postgres flexible-server microsoft-entra-admin create \
@@ -787,7 +787,7 @@ az postgres flexible-server microsoft-entra-admin create \
   --type ServicePrincipal
 ```
 
-#### 3. Configurer le Container App
+#### 3. Configure the Container App
 
 ```bash
 az containerapp update \
@@ -800,49 +800,49 @@ az containerapp update \
   --remove-env-vars POSTGRES_PASSWORD
 ```
 
-### Configuration côté code
+### Code-side Configuration
 
-Le fichier `plugin_config.py` supporte deux modes d'authentification :
+The `plugin_config.py` file supports two authentication modes:
 
-- **`password`** (défaut) : DSN classique `postgresql://user:pass@host/db`
-- **`msi`** : DSN sans mot de passe (`host=... user=...`), le token est fourni dynamiquement
+- **`password`** (default): classic DSN `postgresql://user:pass@host/db`
+- **`msi`**: passwordless DSN (`host=... user=...`), the token is provided dynamically
 
-Le fichier `db.py` acquiert un token frais via `DefaultAzureCredential` à chaque création de pool :
+The `db.py` file acquires a fresh token via `DefaultAzureCredential` on each pool creation:
 
 ```python
 from azure.identity import DefaultAzureCredential
 
 credential = DefaultAzureCredential(managed_identity_client_id="<client-id>")
 token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
-# token.token est passé comme password à psycopg
+# token.token is passed as password to psycopg
 ```
 
 ### Terraform (IaC)
 
-La configuration MSI est gérée dans `infra/` :
+The MSI configuration is managed in `infra/`:
 
-- **`main.tf`** : Active `active_directory_auth_enabled` sur le serveur PG et déclare la MSI comme `azurerm_postgresql_flexible_server_active_directory_administrator`
-- **`container-apps.tf`** : Le Container App API utilise `POSTGRES_AUTH_METHOD=msi` et `AZURE_CLIENT_ID` au lieu de `POSTGRES_PASSWORD`
+- **`main.tf`**: Enables `active_directory_auth_enabled` on the PG server and declares the MSI as `azurerm_postgresql_flexible_server_active_directory_administrator`
+- **`container-apps.tf`**: The API Container App uses `POSTGRES_AUTH_METHOD=msi` and `AZURE_CLIENT_ID` instead of `POSTGRES_PASSWORD`
 
-> **Avantages MSI :** Pas de mot de passe à gérer, rotation automatique des tokens, audit via Entra ID, pas de secrets dans les variables d'environnement.
+> **MSI benefits:** No password to manage, automatic token rotation, audit via Entra ID, no secrets in environment variables.
 
 ---
 
-## Intégration du plugin dans az-scout
+## Plugin Integration with az-scout
 
-### Installation depuis PyPI (ou un registre privé)
+### Install from PyPI (or a private registry)
 
 ```bash
 uv pip install az-scout-bdd-sku
 ```
 
-### Installation depuis Git
+### Install from Git
 
 ```bash
 uv pip install "az-scout-bdd-sku @ git+https://github.com/rsabile/az-scout-plugin-bdd-sku.git"
 ```
 
-### Installation en mode développement
+### Install in development mode
 
 ```bash
 git clone https://github.com/rsabile/az-scout-plugin-bdd-sku.git
@@ -850,13 +850,13 @@ cd az-scout-plugin-bdd-sku
 uv pip install -e ".[dev]"
 ```
 
-### Via le gestionnaire de plugins az-scout
+### Via the az-scout plugin manager
 
-Dans l'interface az-scout : **Settings → Plugins → Install** et renseigner l'URL Git du repo.
+In the az-scout UI: **Settings → Plugins → Install** and enter the repo's Git URL.
 
-### Vérifier que le plugin est chargé
+### Verify the plugin is loaded
 
-Au démarrage d'az-scout, les logs affichent :
+On az-scout startup, the logs show:
 
 ```
 INFO: Discovered plugin: bdd-sku v0.1.0
@@ -865,55 +865,55 @@ INFO: Registered MCP tools: cache_status, get_spot_eviction_rates, get_spot_evic
 INFO: Loaded plugin tab: SKU DB Cache
 ```
 
-Le plugin ajoute :
+The plugin adds:
 
-| Élément | Description |
+| Element | Description |
 |---|---|
-| **Onglet UI** `SKU DB Cache` | Affiche les comptages (prix, éviction, historique) et le dernier run |
-| **4 routes API** | `/status`, `/spot/eviction-rates`, `/spot/eviction-rates/history`, `/spot/price-history` |
-| **4 outils MCP** | `cache_status`, `get_spot_eviction_rates`, `get_spot_eviction_history`, `get_spot_price_history` |
+| **UI Tab** `SKU DB Cache` | Displays counts (prices, eviction, history) and last run |
+| **4 API routes** | `/status`, `/spot/eviction-rates`, `/spot/eviction-rates/history`, `/spot/price-history` |
+| **4 MCP tools** | `cache_status`, `get_spot_eviction_rates`, `get_spot_eviction_history`, `get_spot_price_history` |
 
 ---
 
-## Structure du projet
+## Project Structure
 
 ```
 az-scout-plugin-bdd-sku/
-├── pyproject.toml                  # Package config, entry point, dépendances
+├── pyproject.toml                  # Package config, entry point, dependencies
 ├── README.md
 ├── LICENSE.txt
 ├── api/
-│   ├── Dockerfile                  # Image Python 3.12-slim, PYTHONPATH=/app/src
-│   ├── main.py                     # FastAPI standalone (lifespan, CORS, /health)
+│   ├── Dockerfile                  # Python 3.12-slim image, PYTHONPATH=/app/src
+│   ├── main.py                     # Standalone FastAPI (lifespan, CORS, /health)
 │   └── requirements.txt            # fastapi, uvicorn, psycopg, azure-identity
 ├── sql/
-│   └── schema.sql                  # Schéma PostgreSQL (6 tables)
+│   └── schema.sql                  # PostgreSQL schema (6 tables)
 ├── postgresql/
-│   └── docker-compose.yml          # Postgres 17 pour le développement local
+│   └── docker-compose.yml          # Postgres 17 for local development
 ├── infra/
 │   ├── main.tf                     # Provider + RG + PG Flexible Server + Entra admin MSI
 │   ├── container-apps.tf           # ACR + Container Apps (API + 4 Jobs) + MSI
-│   ├── variables.tf                # Variables Terraform
-│   ├── outputs.tf                  # Outputs (FQDN, noms de ressources, etc.)
-│   └── terraform.tfvars.example    # Exemple de fichier de variables
+│   ├── variables.tf                # Terraform variables
+│   ├── outputs.tf                  # Outputs (FQDN, resource names, etc.)
+│   └── terraform.tfvars.example    # Example variables file
 ├── ingestion/
-│   ├── Dockerfile                  # Image Docker pour les jobs CLI
-│   ├── pyproject.toml              # Dépendances ingestion (psycopg2, requests, azure-identity)
+│   ├── Dockerfile                  # Docker image for CLI jobs
+│   ├── pyproject.toml              # Ingestion dependencies (psycopg2, requests, azure-identity)
 │   └── app/
-│       ├── main.py                 # Point d'entrée CLI
+│       ├── main.py                 # CLI entry point
 │       ├── core/
-│       │   ├── base_collector.py   # Classe abstraite BaseCollector
-│       │   └── orchestrator.py     # Orchestrateur de jobs
+│       │   ├── base_collector.py   # Abstract BaseCollector class
+│       │   └── orchestrator.py     # Job orchestrator
 │       ├── collectors/
-│       │   ├── azure_pricing_collector.py  # Collecteur Azure Retail Prices API
-│       │   └── azure_spot_collector.py     # Collecteur Azure Spot (éviction + prix)
+│       │   ├── azure_pricing_collector.py  # Azure Retail Prices API collector
+│       │   └── azure_spot_collector.py     # Azure Spot collector (eviction + prices)
 │       └── shared/
-│           ├── config.py           # Gestion des variables d'environnement
-│           └── pg_client.py        # Client PostgreSQL (sync)
+│           ├── config.py           # Environment variable management
+│           └── pg_client.py        # PostgreSQL client (sync)
 ├── sku-mapper-job/
-│   ├── Dockerfile                  # Image Python 3.11-slim, multi-stage
-│   ├── pyproject.toml              # Dépendances (psycopg[binary])
-│   ├── README.md                   # Documentation dédiée
+│   ├── Dockerfile                  # Python 3.11-slim image, multi-stage
+│   ├── pyproject.toml              # Dependencies (psycopg[binary])
+│   ├── README.md                   # Dedicated documentation
 │   ├── deploy/
 │   │   ├── cronjob.yaml            # Kubernetes CronJob
 │   │   └── container-app-job.yaml  # Azure Container Apps Job
@@ -922,10 +922,10 @@ az-scout-plugin-bdd-sku/
 │   │   ├── __main__.py             # python -m sku_mapper_job
 │   │   ├── config.py               # Configuration env vars (dataclass)
 │   │   ├── db.py                   # Fonctions PostgreSQL (psycopg3)
-│   │   ├── main.py                 # Point d'entrée run()
+│   │   ├── main.py                 # Entry point run()
 │   │   ├── mapping.py              # FAMILY_CATEGORY dict
 │   │   ├── parser.py               # Regex parser SKU Azure
-│   │   └── sql.py                  # DDL + requêtes SQL
+│   │   └── sql.py                  # DDL + SQL queries
 │   └── tests/                      # 52 tests pytest
 ├── src/
 │   └── az_scout_bdd_sku/
@@ -942,18 +942,18 @@ az-scout-plugin-bdd-sku/
     └── test_bdd_sku.py             # Tests pytest (routes + outils MCP)
 ```
 
-## Base de données
+## Database
 
-5 tables PostgreSQL :
+5 PostgreSQL tables:
 
 | Table | Description |
 |---|---|
-| `job_runs` | Suivi des exécutions d'ingestion (status, durée, items lus/écrits) |
-| `job_logs` | Logs détaillés par run |
-| `retail_prices_vm` | Prix retail des VM Azure (25 colonnes, UPSERT via contrainte UNIQUE) |
-| `spot_eviction_rates` | Taux d'éviction Spot par SKU×région (`UNIQUE (sku_name, region, job_id)` — un snapshot par exécution) |
-| `spot_price_history` | Historique des prix Spot par SKU×région×OS (tableau JSONB de prix horodatés) |
-| `vm_sku_catalog` | Catalogue des SKUs VM enrichi : famille, série, version, vCPU, catégorie, workload tags (créé par le SKU Mapper) |
+| `job_runs` | Ingestion execution tracking (status, duration, items read/written) |
+| `job_logs` | Detailed logs per run |
+| `retail_prices_vm` | Azure VM retail prices (25 columns, UPSERT via UNIQUE constraint) |
+| `spot_eviction_rates` | Spot eviction rates per SKU×region (`UNIQUE (sku_name, region, job_id)` — one snapshot per execution) |
+| `spot_price_history` | Spot price history per SKU×region×OS (timestamped JSONB price array) |
+| `vm_sku_catalog` | Enriched VM SKU catalog: family, series, version, vCPU, category, workload tags (created by the SKU Mapper) |
 
 ---
 
