@@ -76,8 +76,12 @@ CREATE INDEX IF NOT EXISTS idx_retail_prices_vm_job
     ON retail_prices_vm (job_id);
 CREATE INDEX IF NOT EXISTS idx_retail_prices_vm_job_datetime
     ON retail_prices_vm (job_datetime DESC);
-CREATE INDEX IF NOT EXISTS idx_retail_prices_vm_savings
-    ON retail_prices_vm (arm_region_name, arm_sku_name, sku_id)
+CREATE INDEX IF NOT EXISTS idx_retail_vm_snapshot_region
+    ON retail_prices_vm (job_datetime, arm_region_name);
+CREATE INDEX IF NOT EXISTS idx_retail_vm_snapshot_sku
+    ON retail_prices_vm (job_datetime, arm_sku_name);
+CREATE INDEX IF NOT EXISTS idx_retail_vm_savings_snapshot
+    ON retail_prices_vm (job_datetime, arm_region_name, arm_sku_name, sku_id)
     WHERE savings_plan IS NOT NULL;
 
 -- ============================================================
@@ -98,6 +102,8 @@ CREATE INDEX IF NOT EXISTS idx_spot_eviction_sku
     ON spot_eviction_rates (sku_name);
 CREATE INDEX IF NOT EXISTS idx_spot_eviction_job_datetime
     ON spot_eviction_rates (job_datetime DESC);
+CREATE INDEX IF NOT EXISTS idx_spot_eviction_snapshot_region
+    ON spot_eviction_rates (job_datetime, region, sku_name);
 
 -- ============================================================
 -- spot_price_history: VM spot price history from Resource Graph
@@ -116,6 +122,8 @@ CREATE INDEX IF NOT EXISTS idx_spot_price_region
     ON spot_price_history (region);
 CREATE INDEX IF NOT EXISTS idx_spot_price_sku
     ON spot_price_history (sku_name);
+CREATE INDEX IF NOT EXISTS idx_spot_price_region_sku
+    ON spot_price_history (region, sku_name);
 
 -- ============================================================
 -- price_summary: pre-aggregated pricing stats per region/category
