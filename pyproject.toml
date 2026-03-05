@@ -14,13 +14,6 @@ dependencies = [
     "requests>=2.31",
 ]
 
-[project.optional-dependencies]
-api = [
-    "uvicorn[standard]>=0.30",
-    "psycopg[binary]>=3.2",
-    "psycopg_pool>=3.2",
-]
-
 [project.urls]
 Homepage = "https://github.com/rsabile/az-scout-plugin-bdd-sku"
 Repository = "https://github.com/rsabile/az-scout-plugin-bdd-sku"
@@ -34,8 +27,7 @@ dev = [
     "mypy>=1.15",
     "httpx>=0.28",
     "types-requests>=2.31",
-    "psycopg[binary]>=3.2",
-    "psycopg_pool>=3.2",
+    "pyyaml>=6.0",
 ]
 
 [project.entry-points."az_scout.plugins"]
