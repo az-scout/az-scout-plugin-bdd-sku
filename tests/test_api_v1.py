@@ -6,6 +6,7 @@ is required.  Each test class covers one endpoint.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -189,29 +190,35 @@ class TestV1OsTypes:
 
 
 class TestV1RetailPrices:
+    _RESOLVED = datetime(2026, 3, 1, tzinfo=UTC)
+
     @patch("az_scout_bdd_sku.db_api.list_retail_prices", new_callable=AsyncMock)
     def test_happy_path(self, mock_fn: AsyncMock, client: TestClient) -> None:
-        mock_fn.return_value = [
-            {
-                "currencyCode": "USD",
-                "armRegionName": "eastus",
-                "armSkuName": "Standard_D2s_v3",
-                "skuId": "sku-1",
-                "pricingType": "Consumption",
-                "reservationTerm": "",
-                "retailPrice": 0.096,
-                "unitPrice": 0.096,
-                "unitOfMeasure": "1 Hour",
-                "effectiveStartDate": "2024-01-01T00:00:00+00:00",
-                "jobId": "j-1",
-                "jobDatetime": "2026-03-01T00:00:00+00:00",
-            },
-        ]
+        mock_fn.return_value = (
+            [
+                {
+                    "currencyCode": "USD",
+                    "armRegionName": "eastus",
+                    "armSkuName": "Standard_D2s_v3",
+                    "skuId": "sku-1",
+                    "pricingType": "Consumption",
+                    "reservationTerm": "",
+                    "retailPrice": 0.096,
+                    "unitPrice": 0.096,
+                    "unitOfMeasure": "1 Hour",
+                    "effectiveStartDate": "2024-01-01T00:00:00+00:00",
+                    "jobId": "j-1",
+                    "jobDatetime": "2026-03-01T00:00:00+00:00",
+                },
+            ],
+            self._RESOLVED,
+        )
         resp = client.get(f"{PREFIX}/retail/prices?region=eastus&currency=USD&limit=100")
         assert resp.status_code == 200
         data = resp.json()
         _assert_list_shape(data)
         assert data["items"][0]["currencyCode"] == "USD"
+        assert data["meta"]["resolvedSnapshotDate"] == self._RESOLVED.isoformat()
 
     def test_invalid_effective_at(self, client: TestClient) -> None:
         resp = client.get(f"{PREFIX}/retail/prices?effectiveAt=not-a-date")
@@ -235,19 +242,40 @@ class TestV1RetailPrices:
             "jobId": "j-1",
             "jobDatetime": None,
         }
+        resolved = self._RESOLVED
         # First request: return limit+1 items
-        mock_fn.return_value = [item, item]
+        mock_fn.return_value = ([item, item], resolved)
         resp1 = client.get(f"{PREFIX}/retail/prices?limit=1")
         data1 = resp1.json()
         assert data1["page"]["hasMore"] is True
         cursor = data1["page"]["cursor"]
 
         # Second request with cursor
-        mock_fn.return_value = [item]
+        mock_fn.return_value = ([item], resolved)
         resp2 = client.get(f"{PREFIX}/retail/prices?limit=1&cursor={cursor}")
         assert resp2.status_code == 200
         data2 = resp2.json()
         assert data2["page"]["hasMore"] is False
+
+    def test_invalid_snapshot_date(self, client: TestClient) -> None:
+        resp = client.get(f"{PREFIX}/retail/prices?snapshotDate=not-a-date")
+        assert resp.status_code == 400
+        assert "snapshotDate" in resp.json()["error"]["message"]
+
+    @patch("az_scout_bdd_sku.db_api.list_retail_prices", new_callable=AsyncMock)
+    def test_snapshot_date_passed_to_db(self, mock_fn: AsyncMock, client: TestClient) -> None:
+        mock_fn.return_value = ([], self._RESOLVED)
+        resp = client.get(f"{PREFIX}/retail/prices?snapshotDate=2026-03-01T00:00:00Z")
+        assert resp.status_code == 200
+        _, kwargs = mock_fn.call_args
+        assert kwargs["snapshot_date"] is not None
+
+    @patch("az_scout_bdd_sku.db_api.list_retail_prices", new_callable=AsyncMock)
+    def test_no_snapshot_meta_when_none(self, mock_fn: AsyncMock, client: TestClient) -> None:
+        mock_fn.return_value = ([], None)
+        resp = client.get(f"{PREFIX}/retail/prices")
+        assert resp.status_code == 200
+        assert "resolvedSnapshotDate" not in resp.json()["meta"]
 
 
 # ==================================================================
@@ -256,27 +284,38 @@ class TestV1RetailPrices:
 
 
 class TestV1RetailPricesLatest:
+    _RESOLVED = datetime(2026, 3, 1, tzinfo=UTC)
+
     @patch("az_scout_bdd_sku.db_api.list_retail_prices_latest", new_callable=AsyncMock)
     def test_happy_path(self, mock_fn: AsyncMock, client: TestClient) -> None:
-        mock_fn.return_value = [
-            {
-                "currencyCode": "EUR",
-                "armRegionName": "westeurope",
-                "armSkuName": "Standard_B2s",
-                "skuId": "sku-2",
-                "pricingType": "Consumption",
-                "reservationTerm": "",
-                "retailPrice": 0.05,
-                "unitPrice": 0.05,
-                "unitOfMeasure": "1 Hour",
-                "effectiveStartDate": None,
-                "jobId": "j-2",
-                "jobDatetime": None,
-            },
-        ]
+        mock_fn.return_value = (
+            [
+                {
+                    "currencyCode": "EUR",
+                    "armRegionName": "westeurope",
+                    "armSkuName": "Standard_B2s",
+                    "skuId": "sku-2",
+                    "pricingType": "Consumption",
+                    "reservationTerm": "",
+                    "retailPrice": 0.05,
+                    "unitPrice": 0.05,
+                    "unitOfMeasure": "1 Hour",
+                    "effectiveStartDate": None,
+                    "jobId": "j-2",
+                    "jobDatetime": None,
+                },
+            ],
+            self._RESOLVED,
+        )
         resp = client.get(f"{PREFIX}/retail/prices/latest")
         assert resp.status_code == 200
         _assert_list_shape(resp.json())
+        assert resp.json()["meta"]["resolvedSnapshotDate"] == self._RESOLVED.isoformat()
+
+    def test_invalid_snapshot_date(self, client: TestClient) -> None:
+        resp = client.get(f"{PREFIX}/retail/prices/latest?snapshotDate=bad")
+        assert resp.status_code == 400
+        assert "snapshotDate" in resp.json()["error"]["message"]
 
 
 # ==================================================================
@@ -317,23 +356,33 @@ class TestV1SpotPrices:
 
 
 class TestV1EvictionRates:
+    _RESOLVED = datetime(2026, 3, 1, tzinfo=UTC)
+
     @patch("az_scout_bdd_sku.db_api.list_eviction_rates", new_callable=AsyncMock)
     def test_happy_path(self, mock_fn: AsyncMock, client: TestClient) -> None:
-        mock_fn.return_value = [
-            {
-                "region": "eastus",
-                "skuName": "Standard_D2s_v3",
-                "jobId": "j-4",
-                "jobDatetimeUtc": "2026-03-01T00:00:00+00:00",
-                "evictionRateRaw": "5-10%",
-                "evictionRate": None,
-            },
-        ]
+        mock_fn.return_value = (
+            [
+                {
+                    "region": "eastus",
+                    "skuName": "Standard_D2s_v3",
+                    "jobId": "j-4",
+                    "jobDatetimeUtc": "2026-03-01T00:00:00+00:00",
+                    "evictionRateRaw": "5-10%",
+                    "evictionRate": None,
+                },
+            ],
+            self._RESOLVED,
+        )
         resp = client.get(f"{PREFIX}/spot/eviction-rates?region=eastus")
         assert resp.status_code == 200
         data = resp.json()
         _assert_list_shape(data)
         assert data["items"][0]["region"] == "eastus"
+        assert data["meta"]["resolvedSnapshotDate"] == self._RESOLVED.isoformat()
+
+    def test_invalid_snapshot_date(self, client: TestClient) -> None:
+        resp = client.get(f"{PREFIX}/spot/eviction-rates?snapshotDate=nope")
+        assert resp.status_code == 400
 
 
 # ==================================================================
@@ -377,20 +426,129 @@ class TestV1EvictionRatesSeries:
 
 
 class TestV1EvictionRatesLatest:
+    _RESOLVED = datetime(2026, 3, 1, tzinfo=UTC)
+
     @patch("az_scout_bdd_sku.db_api.list_eviction_rates_latest", new_callable=AsyncMock)
     def test_happy_path(self, mock_fn: AsyncMock, client: TestClient) -> None:
-        mock_fn.return_value = [
-            {
-                "region": "westeurope",
-                "skuName": "Standard_D4s_v3",
-                "jobId": "j-5",
-                "jobDatetimeUtc": "2026-03-01T00:00:00+00:00",
-                "evictionRateRaw": "10",
-                "evictionRate": 10.0,
-            },
-        ]
+        mock_fn.return_value = (
+            [
+                {
+                    "region": "westeurope",
+                    "skuName": "Standard_D4s_v3",
+                    "jobId": "j-5",
+                    "jobDatetimeUtc": "2026-03-01T00:00:00+00:00",
+                    "evictionRateRaw": "10",
+                    "evictionRate": 10.0,
+                },
+            ],
+            self._RESOLVED,
+        )
         resp = client.get(f"{PREFIX}/spot/eviction-rates/latest?region=westeurope")
         assert resp.status_code == 200
         data = resp.json()
         _assert_list_shape(data)
         assert data["items"][0]["evictionRate"] == 10.0
+        assert data["meta"]["resolvedSnapshotDate"] == self._RESOLVED.isoformat()
+
+
+# ==================================================================
+# /v1/retail/prices/compare
+# ==================================================================
+
+
+class TestV1RetailPricesCompare:
+    _RESOLVED = datetime(2026, 3, 1, tzinfo=UTC)
+
+    @patch("az_scout_bdd_sku.db_api.retail_prices_compare", new_callable=AsyncMock)
+    def test_happy_path(self, mock_fn: AsyncMock, client: TestClient) -> None:
+        mock_fn.return_value = (
+            [
+                {"armRegionName": "eastus", "retailPrice": 0.096},
+                {"armRegionName": "westus", "retailPrice": 0.098},
+            ],
+            self._RESOLVED,
+        )
+        resp = client.get(f"{PREFIX}/retail/prices/compare?sku=Standard_D2s_v3")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["meta"]["sku"] == "Standard_D2s_v3"
+        assert data["meta"]["regionCount"] == 2
+        assert data["meta"]["resolvedSnapshotDate"] == self._RESOLVED.isoformat()
+        assert len(data["items"]) == 2
+
+    def test_invalid_snapshot_date(self, client: TestClient) -> None:
+        resp = client.get(f"{PREFIX}/retail/prices/compare?sku=foo&snapshotDate=bad")
+        assert resp.status_code == 400
+
+    @patch("az_scout_bdd_sku.db_api.retail_prices_compare", new_callable=AsyncMock)
+    def test_no_snapshot_meta_when_none(self, mock_fn: AsyncMock, client: TestClient) -> None:
+        mock_fn.return_value = ([], None)
+        resp = client.get(f"{PREFIX}/retail/prices/compare?sku=foo")
+        assert resp.status_code == 200
+        assert "resolvedSnapshotDate" not in resp.json()["meta"]
+
+
+# ==================================================================
+# /v1/spot/detail
+# ==================================================================
+
+
+class TestV1SpotDetail:
+    _RESOLVED = datetime(2026, 3, 1, tzinfo=UTC)
+
+    @patch("az_scout_bdd_sku.db_api.spot_detail", new_callable=AsyncMock)
+    def test_happy_path(self, mock_fn: AsyncMock, client: TestClient) -> None:
+        mock_fn.return_value = (
+            {"spotPrice": 0.012, "evictionRate": "5-10%"},
+            self._RESOLVED,
+        )
+        resp = client.get(f"{PREFIX}/spot/detail?region=eastus&sku=Standard_D2s_v3")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["item"]["spotPrice"] == 0.012
+        assert data["meta"]["resolvedSnapshotDate"] == self._RESOLVED.isoformat()
+
+    def test_invalid_snapshot_date(self, client: TestClient) -> None:
+        resp = client.get(
+            f"{PREFIX}/spot/detail?region=eastus&sku=Standard_D2s_v3&snapshotDate=bad"
+        )
+        assert resp.status_code == 400
+
+
+# ==================================================================
+# /v1/retail/savings-plans
+# ==================================================================
+
+
+class TestV1SavingsPlans:
+    _RESOLVED = datetime(2026, 3, 1, tzinfo=UTC)
+
+    @patch("az_scout_bdd_sku.db_api.list_savings_plans", new_callable=AsyncMock)
+    def test_happy_path(self, mock_fn: AsyncMock, client: TestClient) -> None:
+        mock_fn.return_value = (
+            [
+                {
+                    "armRegionName": "eastus",
+                    "armSkuName": "Standard_D2s_v3",
+                    "skuId": "sku-sp-1",
+                    "retailPrice": 0.07,
+                },
+            ],
+            self._RESOLVED,
+        )
+        resp = client.get(f"{PREFIX}/retail/savings-plans?region=eastus")
+        assert resp.status_code == 200
+        data = resp.json()
+        _assert_list_shape(data)
+        assert data["meta"]["resolvedSnapshotDate"] == self._RESOLVED.isoformat()
+
+    def test_invalid_snapshot_date(self, client: TestClient) -> None:
+        resp = client.get(f"{PREFIX}/retail/savings-plans?snapshotDate=bad")
+        assert resp.status_code == 400
+
+    @patch("az_scout_bdd_sku.db_api.list_savings_plans", new_callable=AsyncMock)
+    def test_no_snapshot_meta_when_none(self, mock_fn: AsyncMock, client: TestClient) -> None:
+        mock_fn.return_value = ([], None)
+        resp = client.get(f"{PREFIX}/retail/savings-plans")
+        assert resp.status_code == 200
+        assert "resolvedSnapshotDate" not in resp.json()["meta"]

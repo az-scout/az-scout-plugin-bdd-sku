@@ -113,38 +113,54 @@ def v1_retail_prices(
     region: str = "",
     sku: str = "",
     currency: str = "",
+    snapshot_date: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
     """GET /v1/retail/prices — retail VM prices, paginated."""
     return _get(  # type: ignore[no-any-return]
         "/v1/retail/prices",
-        {"region": region, "sku": sku, "currency": currency, "limit": limit, "cursor": cursor},
+        {
+            "region": region,
+            "sku": sku,
+            "currency": currency,
+            "snapshotDate": snapshot_date,
+            "limit": limit,
+            "cursor": cursor,
+        },
     )
 
 
 def v1_eviction_rates(
     region: str = "",
     sku: str = "",
+    snapshot_date: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
     """GET /v1/spot/eviction-rates — spot eviction rates, paginated."""
     return _get(  # type: ignore[no-any-return]
         "/v1/spot/eviction-rates",
-        {"region": region, "sku": sku, "limit": limit, "cursor": cursor},
+        {
+            "region": region,
+            "sku": sku,
+            "snapshotDate": snapshot_date,
+            "limit": limit,
+            "cursor": cursor,
+        },
     )
 
 
 def v1_eviction_rates_latest(
     region: str = "",
     sku: str = "",
+    snapshot_date: str = "",
     limit: int = 200,
 ) -> dict[str, Any]:
     """GET /v1/spot/eviction-rates/latest — latest eviction rate per (region, sku)."""
     return _get(  # type: ignore[no-any-return]
         "/v1/spot/eviction-rates/latest",
-        {"region": region, "sku": sku, "limit": limit},
+        {"region": region, "sku": sku, "snapshotDate": snapshot_date, "limit": limit},
     )
 
 
@@ -355,6 +371,7 @@ def v1_retail_prices_compare(
     *,
     currency: str = "",
     pricing_type: str = "",
+    snapshot_date: str = "",
 ) -> dict[str, Any]:
     """GET /v1/retail/prices/compare — compare a SKU across all regions."""
     params: dict[str, Any] = {"sku": sku}
@@ -362,6 +379,8 @@ def v1_retail_prices_compare(
         params["currency"] = currency
     if pricing_type:
         params["pricingType"] = pricing_type
+    if snapshot_date:
+        params["snapshotDate"] = snapshot_date
     return _get("/v1/retail/prices/compare", params)  # type: ignore[no-any-return]
 
 
@@ -375,11 +394,14 @@ def v1_spot_detail(
     sku: str,
     *,
     os_type: str = "",
+    snapshot_date: str = "",
 ) -> dict[str, Any]:
     """GET /v1/spot/detail — composite spot detail."""
     params: dict[str, Any] = {"region": region, "sku": sku}
     if os_type:
         params["osType"] = os_type
+    if snapshot_date:
+        params["snapshotDate"] = snapshot_date
     return _get("/v1/spot/detail", params)  # type: ignore[no-any-return]
 
 
@@ -393,6 +415,7 @@ def v1_savings_plans(
     region: str = "",
     sku: str = "",
     currency: str = "",
+    snapshot_date: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
@@ -404,6 +427,8 @@ def v1_savings_plans(
         params["sku"] = sku
     if currency:
         params["currency"] = currency
+    if snapshot_date:
+        params["snapshotDate"] = snapshot_date
     if cursor:
         params["cursor"] = cursor
     return _get("/v1/retail/savings-plans", params)  # type: ignore[no-any-return]

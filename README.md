@@ -219,9 +219,9 @@ The plugin exposes 4 tools on the az-scout MCP server, usable by LLMs in the int
 | `v1_status` | *(none)* | v1 status: DB health, stats per dataset |
 | `v1_list_locations` | `limit?`, `cursor?` | List Azure regions (paginated) |
 | `v1_list_skus` | `search?`, `limit?`, `cursor?` | List VM SKUs (paginated) |
-| `v1_retail_prices` | `region?`, `sku?`, `currency?`, `limit?`, `cursor?` | VM retail prices (paginated) |
-| `v1_eviction_rates` | `region?`, `sku?`, `limit?`, `cursor?` | Spot eviction rates (paginated) |
-| `v1_eviction_rates_latest` | `region?`, `sku?`, `limit?` | Latest eviction rate per (region, sku) |
+| `v1_retail_prices` | `region?`, `sku?`, `currency?`, `snapshot_date?`, `limit?`, `cursor?` | VM retail prices (paginated) |
+| `v1_eviction_rates` | `region?`, `sku?`, `snapshot_date?`, `limit?`, `cursor?` | Spot eviction rates (paginated) |
+| `v1_eviction_rates_latest` | `region?`, `sku?`, `snapshot_date?`, `limit?` | Latest eviction rate per (region, sku) |
 | `v1_pricing_categories` | `limit?`, `cursor?` | Distinct pricing categories (paginated) |
 | `v1_pricing_summary` | `region?`, `category?`, `priceType?`, `snapshotSince?`, `limit?`, `cursor?` | Aggregated price summaries (multi-value, paginated) |
 | `v1_pricing_summary_latest` | `region?`, `category?`, `priceType?`, `limit?`, `cursor?` | Summaries from latest run (paginated) |
@@ -231,9 +231,9 @@ The plugin exposes 4 tools on the az-scout MCP server, usable by LLMs in the int
 | `v1_jobs` | `dataset?`, `status?`, `limit?`, `cursor?` | Ingestion job runs (paginated, most recent first) |
 | `v1_job_logs` | `run_id`, `level?`, `limit?`, `cursor?` | Logs for a specific job run (paginated) |
 | `v1_spot_prices_series` | `region`, `sku`, `os_type?`, `bucket?` | Spot price time series (denormalized JSONB) |
-| `v1_retail_prices_compare` | `sku`, `currency?`, `pricing_type?` | Compare a SKU across all regions |
-| `v1_spot_detail` | `region`, `sku`, `os_type?` | Composite Spot detail (price + eviction + catalog) |
-| `v1_savings_plans` | `region?`, `sku?`, `currency?`, `limit?`, `cursor?` | Retail prices with savings plan data (paginated) |
+| `v1_retail_prices_compare` | `sku`, `currency?`, `pricing_type?`, `snapshot_date?` | Compare a SKU across all regions |
+| `v1_spot_detail` | `region`, `sku`, `os_type?`, `snapshot_date?` | Composite Spot detail (price + eviction + catalog) |
+| `v1_savings_plans` | `region?`, `sku?`, `currency?`, `snapshot_date?`, `limit?`, `cursor?` | Retail prices with savings plan data (paginated) |
 | `v1_pricing_summary_compare` | `regions`, `price_type?`, `category?` | Compare pricing summaries between regions |
 | `v1_stats` | *(none)* | Global dashboard metrics |
 
@@ -262,6 +262,22 @@ curl ".../v1/locations?limit=100"
 curl ".../v1/locations?limit=100&cursor=eyJuYW1lIjoi..."
 ```
 
+### Snapshot Scoping
+
+Endpoints that return ingestion data support an optional **`snapshotDate`** query parameter
+(ISO 8601, e.g. `2026-03-01` or `2026-03-01T14:00:00Z`).
+
+| Behaviour | Description |
+|---|---|
+| **Omitted** (default) | Queries are scoped to the **latest** available snapshot |
+| **Provided** | Queries are scoped to the latest snapshot **on or before** the given date |
+
+The resolved snapshot date is returned in `meta.resolvedSnapshotDate`.
+
+**Affected endpoints:** `/v1/retail/prices`, `/v1/retail/prices/latest`, `/v1/retail/prices/compare`,
+`/v1/spot/eviction-rates`, `/v1/spot/eviction-rates/latest`, `/v1/spot/detail`,
+`/v1/retail/savings-plans`.
+
 ### JSON Contract
 
 All 2xx responses follow the `ListResponse<T>` structure:
@@ -270,7 +286,11 @@ All 2xx responses follow the `ListResponse<T>` structure:
 {
   "items": [...],
   "page": { "limit": 1000, "cursor": "...", "hasMore": true },
-  "meta": { "dataSource": "local-db", "generatedAt": "2026-03-02T..." }
+  "meta": {
+    "dataSource": "local-db",
+    "generatedAt": "2026-03-02T...",
+    "resolvedSnapshotDate": "2026-03-02T02:00:00+00:00"
+  }
 }
 ```
 
@@ -321,6 +341,9 @@ curl "http://localhost:5001/plugins/bdd-sku/v1/status"
 
 # Retail prices (first 100 in USD, region eastus)
 curl "http://localhost:5001/plugins/bdd-sku/v1/retail/prices?region=eastus&currency=USD&limit=100"
+
+# Retail prices scoped to a specific date
+curl "http://localhost:5001/plugins/bdd-sku/v1/retail/prices?region=eastus&snapshotDate=2026-03-01&limit=100"
 
 # Eviction rates updated in the last 24h
 curl "http://localhost:5001/plugins/bdd-sku/v1/spot/eviction-rates?updatedSince=2026-03-01T00:00:00Z&limit=500"

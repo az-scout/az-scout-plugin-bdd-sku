@@ -512,6 +512,10 @@ async def v1_retail_prices(
         None,
         description="ISO datetime — job_datetime >= value",
     ),
+    snapshotDate: str | None = Query(  # noqa: N803
+        None,
+        description="ISO datetime — scope to snapshot <= value (default: latest)",
+    ),
     limit: int | None = Query(None, description="Page size (1-5000, default 1000)"),
     cursor: str | None = Query(None, description="Opaque pagination cursor"),
 ) -> JSONResponse:
@@ -524,6 +528,7 @@ async def v1_retail_prices(
         lim = parse_limit(limit)
         eff = parse_iso_dt(effectiveAt, param_name="effectiveAt")
         upd = parse_iso_dt(updatedSince, param_name="updatedSince")
+        snap = parse_iso_dt(snapshotDate, param_name="snapshotDate")
     except ValidationError as exc:
         return _error_response(400, "BAD_REQUEST", str(exc))
 
@@ -535,7 +540,7 @@ async def v1_retail_prices(
             return _error_response(400, "BAD_REQUEST", str(exc))
 
     try:
-        items = await list_retail_prices(
+        items, resolved = await list_retail_prices(
             lim,
             cursor_payload,
             region=region,
@@ -543,6 +548,7 @@ async def v1_retail_prices(
             currency=currency,
             effective_at=eff,
             updated_since=upd,
+            snapshot_date=snap,
         )
     except Exception:
         logger.exception("v1/retail/prices error")
@@ -558,8 +564,9 @@ async def v1_retail_prices(
             "reservationTerm": it["reservationTerm"],
         }
 
+    snap_meta = {"resolvedSnapshotDate": resolved.isoformat()} if resolved else {}
     trimmed, page = build_page(items, lim, cursor_builder=_cursor_builder)
-    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta()})
+    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta(snap_meta)})
 
 
 @v1_router.get("/retail/prices/latest")
@@ -567,16 +574,21 @@ async def v1_retail_prices_latest(
     region: str | None = Query(None, description="Filter by arm_region_name"),
     sku: str | None = Query(None, description="Filter by arm_sku_name"),
     currency: str | None = Query(None, description="Filter by currency_code"),
+    snapshotDate: str | None = Query(  # noqa: N803
+        None,
+        description="ISO datetime — scope to snapshot <= value (default: latest)",
+    ),
     limit: int | None = Query(None, description="Page size (1-5000, default 1000)"),
     cursor: str | None = Query(None, description="Opaque pagination cursor"),
 ) -> JSONResponse:
     """Latest retail price per unique key (v1, paginated)."""
     from az_scout_bdd_sku.db_api import list_retail_prices_latest
     from az_scout_bdd_sku.pagination import InvalidCursorError, build_page, decode_cursor
-    from az_scout_bdd_sku.validation import ValidationError, parse_limit
+    from az_scout_bdd_sku.validation import ValidationError, parse_iso_dt, parse_limit
 
     try:
         lim = parse_limit(limit)
+        snap = parse_iso_dt(snapshotDate, param_name="snapshotDate")
     except ValidationError as exc:
         return _error_response(400, "BAD_REQUEST", str(exc))
 
@@ -588,12 +600,13 @@ async def v1_retail_prices_latest(
             return _error_response(400, "BAD_REQUEST", str(exc))
 
     try:
-        items = await list_retail_prices_latest(
+        items, resolved = await list_retail_prices_latest(
             lim,
             cursor_payload,
             region=region,
             sku=sku,
             currency=currency,
+            snapshot_date=snap,
         )
     except Exception:
         logger.exception("v1/retail/prices/latest error")
@@ -608,8 +621,9 @@ async def v1_retail_prices_latest(
             "reservationTerm": it["reservationTerm"],
         }
 
+    snap_meta = {"resolvedSnapshotDate": resolved.isoformat()} if resolved else {}
     trimmed, page = build_page(items, lim, cursor_builder=_cursor_builder)
-    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta()})
+    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta(snap_meta)})
 
 
 @v1_router.get("/spot/prices")
@@ -678,6 +692,10 @@ async def v1_eviction_rates(
         alias="updatedSince",
         description="ISO datetime — job_datetime >= value",
     ),
+    snapshotDate: str | None = Query(  # noqa: N803
+        None,
+        description="ISO datetime — scope to snapshot <= value (default: latest)",
+    ),
     limit: int | None = Query(None, description="Page size (1-5000, default 1000)"),
     cursor: str | None = Query(None, description="Opaque pagination cursor"),
 ) -> JSONResponse:
@@ -689,6 +707,7 @@ async def v1_eviction_rates(
     try:
         lim = parse_limit(limit)
         upd = parse_iso_dt(updatedSince, param_name="updatedSince")
+        snap = parse_iso_dt(snapshotDate, param_name="snapshotDate")
     except ValidationError as exc:
         return _error_response(400, "BAD_REQUEST", str(exc))
 
@@ -700,12 +719,13 @@ async def v1_eviction_rates(
             return _error_response(400, "BAD_REQUEST", str(exc))
 
     try:
-        items = await list_eviction_rates(
+        items, resolved = await list_eviction_rates(
             lim,
             cursor_payload,
             region=region,
             sku=sku,
             updated_since=upd,
+            snapshot_date=snap,
         )
     except Exception:
         logger.exception("v1/spot/eviction-rates error")
@@ -719,8 +739,9 @@ async def v1_eviction_rates(
             "jobId": it["jobId"],
         }
 
+    snap_meta = {"resolvedSnapshotDate": resolved.isoformat()} if resolved else {}
     trimmed, page = build_page(items, lim, cursor_builder=_cursor_builder)
-    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta()})
+    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta(snap_meta)})
 
 
 @v1_router.get("/spot/eviction-rates/series")
@@ -764,25 +785,36 @@ async def v1_eviction_rates_series(
 async def v1_eviction_rates_latest(
     region: str | None = Query(None, description="Filter by region"),
     sku: str | None = Query(None, description="Filter by sku_name"),
+    snapshotDate: str | None = Query(  # noqa: N803
+        None,
+        description="ISO datetime — scope to snapshot <= value (default: latest)",
+    ),
     limit: int | None = Query(None, description="Max rows (default 200, max 5000)"),
 ) -> JSONResponse:
     """Latest eviction rate per (region, sku_name) (v1, no cursor pagination)."""
     from az_scout_bdd_sku.db_api import list_eviction_rates_latest
-    from az_scout_bdd_sku.validation import ValidationError, parse_limit
+    from az_scout_bdd_sku.validation import ValidationError, parse_iso_dt, parse_limit
 
     try:
         lim = parse_limit(limit, default=200)
+        snap = parse_iso_dt(snapshotDate, param_name="snapshotDate")
     except ValidationError as exc:
         return _error_response(400, "BAD_REQUEST", str(exc))
 
     try:
-        items = await list_eviction_rates_latest(lim, region=region, sku=sku)
+        items, resolved = await list_eviction_rates_latest(
+            lim,
+            region=region,
+            sku=sku,
+            snapshot_date=snap,
+        )
     except Exception:
         logger.exception("v1/spot/eviction-rates/latest error")
         return _error_response(500, "INTERNAL", "Query failed")
 
+    snap_meta = {"resolvedSnapshotDate": resolved.isoformat()} if resolved else {}
     page = {"limit": lim, "cursor": None, "hasMore": False}
-    return JSONResponse(content={"items": items, "page": page, "meta": _meta()})
+    return JSONResponse(content={"items": items, "page": page, "meta": _meta(snap_meta)})
 
 
 # ------------------------------------------------------------------
@@ -1210,19 +1242,35 @@ async def v1_retail_prices_compare(
     pricingType: str | None = Query(  # noqa: N803
         None, description="Pricing type filter (e.g. Consumption)"
     ),
+    snapshotDate: str | None = Query(  # noqa: N803
+        None,
+        description="ISO datetime — scope to snapshot <= value (default: latest)",
+    ),
 ) -> JSONResponse:
     """Compare a SKU's retail price across all regions (v1)."""
     from az_scout_bdd_sku.db_api import retail_prices_compare
+    from az_scout_bdd_sku.validation import ValidationError, parse_iso_dt
 
     try:
-        items = await retail_prices_compare(sku, currency=currency, pricing_type=pricingType)
+        snap = parse_iso_dt(snapshotDate, param_name="snapshotDate")
+    except ValidationError as exc:
+        return _error_response(400, "BAD_REQUEST", str(exc))
+
+    try:
+        items, resolved = await retail_prices_compare(
+            sku,
+            currency=currency,
+            pricing_type=pricingType,
+            snapshot_date=snap,
+        )
     except Exception:
         logger.exception("v1/retail/prices/compare error")
         return _error_response(500, "INTERNAL", "Query failed")
 
     region_count = len(items)
     page = {"limit": region_count, "cursor": None, "hasMore": False}
-    meta = _meta({"sku": sku, "regionCount": region_count})
+    snap_extra = {"resolvedSnapshotDate": resolved.isoformat()} if resolved else {}
+    meta = _meta({"sku": sku, "regionCount": region_count, **snap_extra})
     return JSONResponse(content={"items": items, "page": page, "meta": meta})
 
 
@@ -1236,18 +1284,34 @@ async def v1_spot_detail(
     region: str = Query(..., description="Region (required)"),
     sku: str = Query(..., description="SKU name (required)"),
     osType: str | None = Query(None, description="OS type filter"),  # noqa: N803
+    snapshotDate: str | None = Query(  # noqa: N803
+        None,
+        description="ISO datetime — scope to snapshot <= value (default: latest)",
+    ),
 ) -> JSONResponse:
     """Composite spot detail: spot price + eviction rate + SKU catalog (v1)."""
     from az_scout_bdd_sku.db_api import spot_detail
+    from az_scout_bdd_sku.validation import ValidationError, parse_iso_dt
 
     try:
-        data = await spot_detail(region, sku, os_type=osType)
+        snap = parse_iso_dt(snapshotDate, param_name="snapshotDate")
+    except ValidationError as exc:
+        return _error_response(400, "BAD_REQUEST", str(exc))
+
+    try:
+        data, resolved = await spot_detail(
+            region,
+            sku,
+            os_type=osType,
+            snapshot_date=snap,
+        )
     except Exception:
         logger.exception("v1/spot/detail error")
         return _error_response(500, "INTERNAL", "Query failed")
 
+    snap_meta = {"resolvedSnapshotDate": resolved.isoformat()} if resolved else {}
     page = {"limit": 1, "cursor": None, "hasMore": False}
-    return JSONResponse(content={"item": data, "page": page, "meta": _meta()})
+    return JSONResponse(content={"item": data, "page": page, "meta": _meta(snap_meta)})
 
 
 # ------------------------------------------------------------------
@@ -1260,16 +1324,21 @@ async def v1_savings_plans(
     region: str | None = Query(None, description="Filter by region"),
     sku: str | None = Query(None, description="Filter by SKU (substring)"),
     currency: str | None = Query(None, description="Currency code filter"),
+    snapshotDate: str | None = Query(  # noqa: N803
+        None,
+        description="ISO datetime — scope to snapshot <= value (default: latest)",
+    ),
     limit: int | None = Query(None, description="Page size (1-5000, default 1000)"),
     cursor: str | None = Query(None, description="Opaque pagination cursor"),
 ) -> JSONResponse:
     """Retail prices with savings plan data (v1, paginated)."""
     from az_scout_bdd_sku.db_api import list_savings_plans
     from az_scout_bdd_sku.pagination import InvalidCursorError, build_page, decode_cursor
-    from az_scout_bdd_sku.validation import ValidationError, parse_limit
+    from az_scout_bdd_sku.validation import ValidationError, parse_iso_dt, parse_limit
 
     try:
         lim = parse_limit(limit)
+        snap = parse_iso_dt(snapshotDate, param_name="snapshotDate")
     except ValidationError as exc:
         return _error_response(400, "BAD_REQUEST", str(exc))
 
@@ -1281,8 +1350,13 @@ async def v1_savings_plans(
             return _error_response(400, "BAD_REQUEST", str(exc))
 
     try:
-        items = await list_savings_plans(
-            lim, cursor_payload, region=region, sku=sku, currency=currency
+        items, resolved = await list_savings_plans(
+            lim,
+            cursor_payload,
+            region=region,
+            sku=sku,
+            currency=currency,
+            snapshot_date=snap,
         )
     except Exception:
         logger.exception("v1/retail/savings-plans error")
@@ -1295,8 +1369,9 @@ async def v1_savings_plans(
             "skuId": it["skuId"],
         }
 
+    snap_meta = {"resolvedSnapshotDate": resolved.isoformat()} if resolved else {}
     trimmed, page = build_page(items, lim, cursor_builder=_cursor_builder)
-    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta()})
+    return JSONResponse(content={"items": trimmed, "page": page, "meta": _meta(snap_meta)})
 
 
 # ------------------------------------------------------------------

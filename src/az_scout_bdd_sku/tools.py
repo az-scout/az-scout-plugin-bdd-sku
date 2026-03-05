@@ -119,30 +119,66 @@ def v1_retail_prices(
     region: str = "",
     sku: str = "",
     currency: str = "",
+    snapshot_date: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
-    """Query retail VM prices with filters. Paginated (keyset cursor)."""
-    return _safe_call(_api_v1_retail_prices, region, sku, currency, limit, cursor)
+    """Query retail VM prices with filters. Paginated (keyset cursor).
+
+    snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
+    Defaults to the most recent snapshot when omitted.
+    """
+    return _safe_call(
+        _api_v1_retail_prices,
+        region,
+        sku,
+        currency,
+        snapshot_date,
+        limit,
+        cursor,
+    )
 
 
 def v1_eviction_rates(
     region: str = "",
     sku: str = "",
+    snapshot_date: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
-    """Query spot eviction rates with filters. Paginated (keyset cursor)."""
-    return _safe_call(_api_v1_eviction_rates, region, sku, limit, cursor)
+    """Query spot eviction rates with filters. Paginated (keyset cursor).
+
+    snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
+    Defaults to the most recent snapshot when omitted.
+    """
+    return _safe_call(
+        _api_v1_eviction_rates,
+        region,
+        sku,
+        snapshot_date,
+        limit,
+        cursor,
+    )
 
 
 def v1_eviction_rates_latest(
     region: str = "",
     sku: str = "",
+    snapshot_date: str = "",
     limit: int = 200,
 ) -> dict[str, Any]:
-    """Latest eviction rate per (region, sku_name). Not paginated."""
-    return _safe_call(_api_v1_eviction_rates_latest, region, sku, limit)
+    """Latest eviction rate per (region, sku_name).
+
+    snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
+    Defaults to the most recent snapshot when omitted.
+    """
+    return _safe_call(
+        _api_v1_eviction_rates_latest,
+        region,
+        sku,
+        snapshot_date,
+        limit,
+    )
 
 
 # ==================================================================
@@ -282,9 +318,20 @@ def v1_spot_detail(
     region: str,
     sku: str,
     os_type: str = "",
+    snapshot_date: str = "",
 ) -> dict[str, Any]:
-    """Composite spot detail: latest price, eviction rate, and SKU catalog entry."""
-    return _safe_call(_api_v1_spot_detail, region, sku, os_type=os_type)
+    """Composite spot detail: latest price, eviction rate, and SKU catalog entry.
+
+    snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
+    Defaults to the most recent snapshot when omitted.
+    """
+    return _safe_call(
+        _api_v1_spot_detail,
+        region,
+        sku,
+        os_type=os_type,
+        snapshot_date=snapshot_date,
+    )
 
 
 # ==================================================================
@@ -296,10 +343,19 @@ def v1_retail_prices_compare(
     sku: str,
     currency: str = "",
     pricing_type: str = "",
+    snapshot_date: str = "",
 ) -> dict[str, Any]:
-    """Compare a SKU's retail price across all regions, grouped by region."""
+    """Compare a SKU's retail price across all regions, grouped by region.
+
+    snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
+    Defaults to the most recent snapshot when omitted.
+    """
     return _safe_call(
-        _api_v1_retail_prices_compare, sku, currency=currency, pricing_type=pricing_type
+        _api_v1_retail_prices_compare,
+        sku,
+        currency=currency,
+        pricing_type=pricing_type,
+        snapshot_date=snapshot_date,
     )
 
 
@@ -307,12 +363,23 @@ def v1_savings_plans(
     region: str = "",
     sku: str = "",
     currency: str = "",
+    snapshot_date: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
-    """Browse retail prices that include savings plan data. Paginated (keyset cursor)."""
+    """Browse retail prices that include savings plan data. Paginated (keyset cursor).
+
+    snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
+    Defaults to the most recent snapshot when omitted.
+    """
     return _safe_call(
-        _api_v1_savings_plans, region=region, sku=sku, currency=currency, limit=limit, cursor=cursor
+        _api_v1_savings_plans,
+        region=region,
+        sku=sku,
+        currency=currency,
+        snapshot_date=snapshot_date,
+        limit=limit,
+        cursor=cursor,
     )
 
 

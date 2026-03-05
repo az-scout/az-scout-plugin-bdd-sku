@@ -14,6 +14,57 @@ from az_scout_bdd_sku.db import get_conn, is_healthy
 from az_scout_bdd_sku.pagination import keyset_clause
 
 # ------------------------------------------------------------------
+# Snapshot resolution helpers
+# ------------------------------------------------------------------
+
+
+async def _resolve_retail_snapshot(
+    target_date: datetime | None = None,
+) -> datetime | None:
+    """Resolve the effective snapshot datetime for retail_prices_vm.
+
+    - ``None`` → latest ``job_datetime`` in the table.
+    - With date → latest ``job_datetime <= target_date``.
+
+    Returns ``None`` when the table is empty or no snapshot matches.
+    """
+    if target_date is None:
+        sql = "SELECT MAX(job_datetime) FROM retail_prices_vm"
+        params: list[Any] = []
+    else:
+        sql = "SELECT MAX(job_datetime) FROM retail_prices_vm WHERE job_datetime <= %s"
+        params = [target_date]
+
+    async with get_conn() as conn:
+        cur = await conn.execute(sql, params)
+        row = await cur.fetchone()
+    return row[0] if row and row[0] else None
+
+
+async def _resolve_spot_snapshot(
+    target_date: datetime | None = None,
+) -> datetime | None:
+    """Resolve the effective snapshot datetime for spot_eviction_rates.
+
+    - ``None`` → latest ``job_datetime`` in the table.
+    - With date → latest ``job_datetime <= target_date``.
+
+    Returns ``None`` when the table is empty or no snapshot matches.
+    """
+    if target_date is None:
+        sql = "SELECT MAX(job_datetime) FROM spot_eviction_rates"
+        params: list[Any] = []
+    else:
+        sql = "SELECT MAX(job_datetime) FROM spot_eviction_rates WHERE job_datetime <= %s"
+        params = [target_date]
+
+    async with get_conn() as conn:
+        cur = await conn.execute(sql, params)
+        row = await cur.fetchone()
+    return row[0] if row and row[0] else None
+
+
+# ------------------------------------------------------------------
 # /v1/status
 # ------------------------------------------------------------------
 
@@ -257,10 +308,21 @@ async def list_retail_prices(
     currency: str | None = None,
     effective_at: datetime | None = None,
     updated_since: datetime | None = None,
-) -> list[dict[str, Any]]:
-    """Return retail prices with optional filters, keyset-paginated."""
+    snapshot_date: datetime | None = None,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Return retail prices with optional filters, keyset-paginated.
+
+    Returns ``(items, resolved_snapshot)`` where *resolved_snapshot* is the
+    effective ``job_datetime`` used for scoping (or ``None`` when empty).
+    """
+    resolved = await _resolve_retail_snapshot(snapshot_date)
+
     clauses: list[str] = []
     params: list[Any] = []
+
+    if resolved is not None:
+        clauses.append("job_datetime = %s")
+        params.append(resolved)
 
     if region:
         clauses.append("arm_region_name = %s")
@@ -299,7 +361,7 @@ async def list_retail_prices(
     async with get_conn() as conn:
         cur = await conn.execute(sql, params)
         rows = await cur.fetchall()
-    return [_retail_row_to_dict(r) for r in rows]
+    return [_retail_row_to_dict(r) for r in rows], resolved
 
 
 def _retail_row_to_dict(r: Any) -> dict[str, Any]:
@@ -355,10 +417,20 @@ async def list_retail_prices_latest(
     region: str | None = None,
     sku: str | None = None,
     currency: str | None = None,
-) -> list[dict[str, Any]]:
-    """Return the latest snapshot per unique retail key, keyset-paginated."""
+    snapshot_date: datetime | None = None,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Return the latest snapshot per unique retail key, keyset-paginated.
+
+    Returns ``(items, resolved_snapshot)``.
+    """
+    resolved = await _resolve_retail_snapshot(snapshot_date)
+
     clauses: list[str] = []
     params: list[Any] = []
+
+    if resolved is not None:
+        clauses.append("job_datetime = %s")
+        params.append(resolved)
 
     if region:
         clauses.append("arm_region_name = %s")
@@ -393,7 +465,7 @@ async def list_retail_prices_latest(
     async with get_conn() as conn:
         cur = await conn.execute(sql, params)
         rows = await cur.fetchall()
-    return [_retail_row_to_dict(r) for r in rows]
+    return [_retail_row_to_dict(r) for r in rows], resolved
 
 
 # ------------------------------------------------------------------
@@ -525,10 +597,20 @@ async def list_eviction_rates(
     dt_from: datetime | None = None,
     dt_to: datetime | None = None,
     updated_since: datetime | None = None,
-) -> list[dict[str, Any]]:
-    """Return spot eviction rates, keyset-paginated."""
+    snapshot_date: datetime | None = None,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Return spot eviction rates, keyset-paginated.
+
+    Returns ``(items, resolved_snapshot)``.
+    """
+    resolved = await _resolve_spot_snapshot(snapshot_date)
+
     clauses: list[str] = []
     params: list[Any] = []
+
+    if resolved is not None:
+        clauses.append("job_datetime = %s")
+        params.append(resolved)
 
     if region:
         clauses.append("region = %s")
@@ -578,7 +660,7 @@ async def list_eviction_rates(
             "evictionRate": float(r[5]) if r[5] is not None else None,
         }
         for r in rows
-    ]
+    ], resolved
 
 
 # ------------------------------------------------------------------
@@ -646,10 +728,20 @@ async def list_eviction_rates_latest(
     *,
     region: str | None = None,
     sku: str | None = None,
-) -> list[dict[str, Any]]:
-    """Return latest eviction rate per (region, sku_name)."""
+    snapshot_date: datetime | None = None,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Return latest eviction rate per (region, sku_name).
+
+    Returns ``(items, resolved_snapshot)``.
+    """
+    resolved = await _resolve_spot_snapshot(snapshot_date)
+
     clauses: list[str] = []
     params: list[Any] = []
+
+    if resolved is not None:
+        clauses.append("job_datetime = %s")
+        params.append(resolved)
 
     if region:
         clauses.append("region = %s")
@@ -685,7 +777,7 @@ async def list_eviction_rates_latest(
             "evictionRate": float(r[5]) if r[5] is not None else None,
         }
         for r in rows
-    ]
+    ], resolved
 
 
 # ==================================================================
@@ -1257,13 +1349,21 @@ async def retail_prices_compare(
     *,
     currency: str | None = None,
     pricing_type: str | None = None,
-) -> dict[str, Any]:
+    snapshot_date: datetime | None = None,
+) -> tuple[dict[str, Any], datetime | None]:
     """Compare a SKU's retail price across regions.
 
-    Returns a dict keyed by region with price info per region.
+    Returns ``(region_dict, resolved_snapshot)`` where *region_dict* is
+    keyed by region with price info per region.
     """
+    resolved = await _resolve_retail_snapshot(snapshot_date)
+
     clauses = ["arm_sku_name ILIKE %s"]
     params: list[Any] = [f"%{sku}%"]
+
+    if resolved is not None:
+        clauses.append("job_datetime = %s")
+        params.append(resolved)
 
     if currency:
         clauses.append("currency_code = %s")
@@ -1301,7 +1401,7 @@ async def retail_prices_compare(
             "effectiveStartDate": r[9].isoformat() if r[9] else None,
         }
         result.setdefault(region_name, []).append(entry)
-    return result
+    return result, resolved
 
 
 # ==================================================================
@@ -1314,11 +1414,15 @@ async def spot_detail(
     sku: str,
     *,
     os_type: str | None = None,
-) -> dict[str, Any]:
+    snapshot_date: datetime | None = None,
+) -> tuple[dict[str, Any], datetime | None]:
     """Combine spot price, eviction rate, and SKU catalog data.
 
-    Returns raw data from all three sources for a specific SKU/region.
+    Returns ``(data, resolved_snapshot)`` with raw data from all three
+    sources for a specific SKU/region.
     """
+    resolved = await _resolve_spot_snapshot(snapshot_date)
+
     result: dict[str, Any] = {"region": region, "sku": sku}
 
     # 1. Spot price history (latest record)
@@ -1349,16 +1453,22 @@ async def spot_detail(
     else:
         result["spotPrice"] = None
 
-    # 2. Eviction rate (latest record)
+    # 2. Eviction rate (scoped to resolved snapshot)
+    eviction_clauses = ["region = %s", "sku_name = %s"]
+    eviction_params: list[Any] = [region, sku]
+    if resolved is not None:
+        eviction_clauses.append("job_datetime = %s")
+        eviction_params.append(resolved)
+
     eviction_sql = (
         "SELECT sku_name, region, eviction_rate, job_id, job_datetime"
         " FROM spot_eviction_rates"
-        " WHERE region = %s AND sku_name = %s"
+        f" WHERE {' AND '.join(eviction_clauses)}"
         " ORDER BY job_datetime DESC NULLS LAST"
         " LIMIT 1"
     )
     async with get_conn() as conn:
-        cur = await conn.execute(eviction_sql, [region, sku])
+        cur = await conn.execute(eviction_sql, eviction_params)
         row = await cur.fetchone()
     if row:
         result["evictionRate"] = {
@@ -1378,7 +1488,7 @@ async def spot_detail(
         row = await cur.fetchone()
     result["catalog"] = _sku_row_to_dict(row) if row else None
 
-    return result
+    return result, resolved
 
 
 # ==================================================================
@@ -1422,10 +1532,20 @@ async def list_savings_plans(
     region: str | None = None,
     sku: str | None = None,
     currency: str | None = None,
-) -> list[dict[str, Any]]:
-    """Return retail prices that have savings plan data, keyset-paginated."""
+    snapshot_date: datetime | None = None,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Return retail prices that have savings plan data, keyset-paginated.
+
+    Returns ``(items, resolved_snapshot)``.
+    """
+    resolved = await _resolve_retail_snapshot(snapshot_date)
+
     clauses: list[str] = ["savings_plan IS NOT NULL"]
     params: list[Any] = []
+
+    if resolved is not None:
+        clauses.append("job_datetime = %s")
+        params.append(resolved)
 
     if region:
         clauses.append("arm_region_name = %s")
@@ -1457,7 +1577,7 @@ async def list_savings_plans(
     async with get_conn() as conn:
         cur = await conn.execute(sql, params)
         rows = await cur.fetchall()
-    return [_savings_row_to_dict(r) for r in rows]
+    return [_savings_row_to_dict(r) for r in rows], resolved
 
 
 # ==================================================================
