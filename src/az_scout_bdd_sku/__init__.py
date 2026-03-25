@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from az_scout.plugin_api import ChatMode, TabDefinition
+    from az_scout.plugin_api import ChatMode, NavbarAction, TabDefinition
     from fastapi import APIRouter
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -111,6 +111,18 @@ class BddSkuPlugin:
 
     def get_chat_modes(self) -> list[ChatMode] | None:
         return None
+
+    def get_navbar_actions(self) -> list[NavbarAction] | None:
+        from az_scout.plugin_api import NavbarAction as _NavbarAction
+
+        return [
+            _NavbarAction(
+                id="bdd-sku",
+                icon="bi bi-database",
+                label="SKU DB Cache",
+                js_entry="js/bdd-sku-offcanvas.js",
+            )
+        ]
 
 
 # Module-level instance — referenced by the entry point

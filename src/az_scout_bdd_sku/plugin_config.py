@@ -14,6 +14,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PATH = Path.home() / ".config" / "az-scout" / "bdd-sku.toml"
+_FALLBACK_PATH = Path("/tmp/az-scout/bdd-sku.toml")
 
 
 @dataclass
@@ -96,10 +97,16 @@ def load_config() -> PluginConfig:
 
     # 2. TOML config file
     path_str = os.environ.get("AZ_SCOUT_BDD_SKU_CONFIG", "")
-    path = Path(path_str) if path_str else _DEFAULT_PATH
+    candidates = [Path(path_str)] if path_str else [_DEFAULT_PATH, _FALLBACK_PATH]
 
-    if not path.is_file():
-        logger.debug("Config file not found at %s – using defaults", path)
+    path: Path | None = None
+    for candidate in candidates:
+        if candidate.is_file():
+            path = candidate
+            break
+
+    if path is None:
+        logger.debug("Config file not found in %s – using defaults", candidates)
         return PluginConfig()
 
     import tomllib
@@ -136,23 +143,8 @@ def is_configured() -> bool:
     return bool(get_config().api_base_url)
 
 
-def save_api_url(url: str) -> None:
-    """Persist *url* to the TOML config file and update the cached config."""
-    global _config
-
-    # Normalize: strip trailing slash
-    url = url.rstrip("/")
-
-    path_str = os.environ.get("AZ_SCOUT_BDD_SKU_CONFIG", "")
-    path = Path(path_str) if path_str else _DEFAULT_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Read existing content (preserve other sections)
-    existing_lines: list[str] = []
-    if path.is_file():
-        existing_lines = path.read_text(encoding="utf-8").splitlines()
-
-    # Replace or append [api] section
+def _build_toml_content(url: str, existing_lines: list[str]) -> str:
+    """Return TOML content with the ``[api]`` section set to *url*."""
     new_lines: list[str] = []
     in_api_section = False
     api_written = False
@@ -165,7 +157,6 @@ def save_api_url(url: str) -> None:
             api_written = True
             continue
         if in_api_section:
-            # Skip old keys in [api] until next section
             if stripped.startswith("[") and stripped != "[api]":
                 in_api_section = False
                 new_lines.append(line)
@@ -178,8 +169,39 @@ def save_api_url(url: str) -> None:
         new_lines.append("[api]")
         new_lines.append(f'base_url = "{url}"')
 
-    path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-    logger.info("Saved API URL to %s", path)
+    return "\n".join(new_lines) + "\n"
+
+
+def _write_toml(path: Path, content: str) -> None:
+    """Write *content* to *path*, creating parent dirs as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def save_api_url(url: str) -> None:
+    """Persist *url* to the TOML config file and update the cached config."""
+    global _config
+
+    # Normalize: strip trailing slash
+    url = url.rstrip("/")
+
+    path_str = os.environ.get("AZ_SCOUT_BDD_SKU_CONFIG", "")
+    path = Path(path_str) if path_str else _DEFAULT_PATH
+
+    # Read existing content (preserve other sections)
+    existing_lines: list[str] = []
+    if path.is_file():
+        existing_lines = path.read_text(encoding="utf-8").splitlines()
+
+    content = _build_toml_content(url, existing_lines)
+
+    try:
+        _write_toml(path, content)
+        logger.info("Saved API URL to %s", path)
+    except PermissionError:
+        logger.warning("Cannot write to %s – falling back to %s", path, _FALLBACK_PATH)
+        _write_toml(_FALLBACK_PATH, content)
+        logger.info("Saved API URL to %s", _FALLBACK_PATH)
 
     # Update cached config
     if _config is not None:
