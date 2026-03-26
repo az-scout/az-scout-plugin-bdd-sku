@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from az_scout_bdd_sku.plugin_routes import router
+
+
+def _run_async(coro):  # type: ignore[no-untyped-def]
+    """Run a coroutine in a fresh event loop (avoids conflicts with anyio)."""
+    return asyncio.run(coro)
 
 
 @pytest.fixture()
@@ -23,6 +30,16 @@ def client(app: FastAPI) -> TestClient:
     return TestClient(app)
 
 
+def _mock_httpx_response(json_data: dict, status_code: int = 200) -> httpx.Response:  # type: ignore[type-arg]
+    """Build a fake httpx.Response for mocking."""
+    resp = httpx.Response(
+        status_code=status_code,
+        json=json_data,
+        request=httpx.Request("GET", "https://api.example.com"),
+    )
+    return resp
+
+
 # ------------------------------------------------------------------
 # Plugin routes: GET /status
 # ------------------------------------------------------------------
@@ -34,18 +51,17 @@ class TestPluginStatus:
     @patch("az_scout_bdd_sku.plugin_routes.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.get_config")
-    @patch("az_scout_bdd_sku.api_client.requests.get")
+    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
     def test_status_returns_api_data(
         self,
-        mock_get: MagicMock,
+        mock_client_cls: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg_client: MagicMock,
         mock_is_cfg_routes: MagicMock,
         client: TestClient,
     ) -> None:
         mock_cfg.return_value.api_base_url = "https://api.example.com"
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
+        json_data = {
             "db_connected": True,
             "retail_prices_count": 42,
             "spot_eviction_rates_count": 10,
@@ -55,8 +71,10 @@ class TestPluginStatus:
             "last_run": {"status": "ok", "items_written": 950},
             "last_run_spot": None,
         }
-        mock_resp.raise_for_status = MagicMock()
-        mock_get.return_value = mock_resp
+        mock_async_client = AsyncMock()
+        mock_async_client.get.return_value = _mock_httpx_response(json_data)
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         resp = client.get("/plugins/bdd-sku/status")
         assert resp.status_code == 200
@@ -80,19 +98,20 @@ class TestPluginStatus:
     @patch("az_scout_bdd_sku.plugin_routes.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.get_config")
-    @patch("az_scout_bdd_sku.api_client.requests.get")
+    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
     def test_status_api_error_returns_502(
         self,
-        mock_get: MagicMock,
+        mock_client_cls: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg_client: MagicMock,
         mock_is_cfg_routes: MagicMock,
         client: TestClient,
     ) -> None:
-        import requests
-
         mock_cfg.return_value.api_base_url = "https://api.example.com"
-        mock_get.side_effect = requests.ConnectionError("refused")
+        mock_async_client = AsyncMock()
+        mock_async_client.get.side_effect = httpx.ConnectError("refused")
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         resp = client.get("/plugins/bdd-sku/status")
         assert resp.status_code == 502
@@ -154,19 +173,19 @@ class TestPluginSettings:
 
     @patch("az_scout_bdd_sku.plugin_routes.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.plugin_routes.get_config")
-    @patch("az_scout_bdd_sku.api_client.requests.get")
+    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
     def test_test_connection_ok(
         self,
-        mock_get: MagicMock,
+        mock_client_cls: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg: MagicMock,
         client: TestClient,
     ) -> None:
         mock_cfg.return_value.api_base_url = "https://api.example.com"
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"status": "healthy"}
-        mock_resp.raise_for_status = MagicMock()
-        mock_get.return_value = mock_resp
+        mock_async_client = AsyncMock()
+        mock_async_client.get.return_value = _mock_httpx_response({"status": "healthy"})
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         resp = client.post("/plugins/bdd-sku/settings/test")
         assert resp.status_code == 200
@@ -196,25 +215,26 @@ class TestCacheStatusTool:
 
     @patch("az_scout_bdd_sku.api_client.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.get_config")
-    @patch("az_scout_bdd_sku.api_client.requests.get")
+    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
     def test_cache_status_returns_data(
         self,
-        mock_get: MagicMock,
+        mock_client_cls: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg: MagicMock,
     ) -> None:
         from az_scout_bdd_sku.tools import cache_status
 
         mock_cfg.return_value.api_base_url = "https://api.example.com"
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
+        json_data = {
             "db_connected": True,
             "retail_prices_count": 100,
         }
-        mock_resp.raise_for_status = MagicMock()
-        mock_get.return_value = mock_resp
+        mock_async_client = AsyncMock()
+        mock_async_client.get.return_value = _mock_httpx_response(json_data)
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        result = cache_status()
+        result = _run_async(cache_status())
         assert result["db_connected"] is True
         assert result["retail_prices_count"] == 100
 
@@ -222,6 +242,6 @@ class TestCacheStatusTool:
     def test_cache_status_not_configured(self, mock_is_cfg: MagicMock) -> None:
         from az_scout_bdd_sku.tools import cache_status
 
-        result = cache_status()
+        result = _run_async(cache_status())
         assert "error" in result
         assert "not configured" in result["error"].lower()

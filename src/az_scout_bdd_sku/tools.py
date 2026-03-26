@@ -6,6 +6,7 @@ The API base URL must be configured in the plugin settings.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from az_scout_bdd_sku.api_client import ApiNotConfiguredError
@@ -43,22 +44,24 @@ from az_scout_bdd_sku.api_client import v1_status as _api_v1_status
 _NOT_CONFIGURED = {"error": "BDD-SKU API URL is not configured. Set it in the plugin settings."}
 
 
-def _safe_call(fn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
-    """Call *fn* and catch ApiNotConfiguredError + request errors."""
+async def _safe_call(
+    fn: Callable[..., Awaitable[dict[str, Any]]], *args: Any, **kwargs: Any
+) -> dict[str, Any]:
+    """Call async *fn* and catch ApiNotConfiguredError + request errors."""
     try:
-        return fn(*args, **kwargs)  # type: ignore[no-any-return]
+        return await fn(*args, **kwargs)
     except ApiNotConfiguredError:
         return _NOT_CONFIGURED
     except Exception as exc:
         return {"error": f"API call failed: {exc}"}
 
 
-def cache_status() -> dict[str, Any]:
+async def cache_status() -> dict[str, Any]:
     """Return the current cache status: DB health, row counts, regions, SKUs, and last runs."""
-    return _safe_call(_api_status)
+    return await _safe_call(_api_status)
 
 
-def get_spot_eviction_rates(
+async def get_spot_eviction_rates(
     region: str = "",
     sku_name: str = "",
     job_id: str = "",
@@ -68,10 +71,10 @@ def get_spot_eviction_rates(
     Optionally filter by region, sku_name (substring), or job_id.
     Without job_id returns the latest snapshot only.
     """
-    return _safe_call(_api_eviction_rates, region, sku_name, job_id)
+    return await _safe_call(_api_eviction_rates, region, sku_name, job_id)
 
 
-def get_spot_price_history(
+async def get_spot_price_history(
     region: str = "",
     sku_name: str = "",
     os_type: str = "",
@@ -80,12 +83,12 @@ def get_spot_price_history(
 
     Optionally filter by region, sku_name (substring), or os_type.
     """
-    return _safe_call(_api_price_history, region, sku_name, os_type)
+    return await _safe_call(_api_price_history, region, sku_name, os_type)
 
 
-def get_spot_eviction_history() -> dict[str, Any]:
+async def get_spot_eviction_history() -> dict[str, Any]:
     """List available eviction rate snapshots (job_id, job_datetime, row_count)."""
-    return _safe_call(_api_eviction_history)
+    return await _safe_call(_api_eviction_history)
 
 
 # ==================================================================
@@ -93,29 +96,29 @@ def get_spot_eviction_history() -> dict[str, Any]:
 # ==================================================================
 
 
-def v1_status() -> dict[str, Any]:
+async def v1_status() -> dict[str, Any]:
     """Return v1 database status: health, row counts, last job per dataset."""
-    return _safe_call(_api_v1_status)
+    return await _safe_call(_api_v1_status)
 
 
-def v1_list_locations(
+async def v1_list_locations(
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
     """List distinct Azure location names across all tables. Paginated (keyset cursor)."""
-    return _safe_call(_api_v1_list_locations, limit, cursor)
+    return await _safe_call(_api_v1_list_locations, limit, cursor)
 
 
-def v1_list_skus(
+async def v1_list_skus(
     search: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
     """List distinct VM SKU names. Optional substring search. Paginated."""
-    return _safe_call(_api_v1_list_skus, search, limit, cursor)
+    return await _safe_call(_api_v1_list_skus, search, limit, cursor)
 
 
-def v1_retail_prices(
+async def v1_retail_prices(
     region: str = "",
     sku: str = "",
     currency: str = "",
@@ -128,7 +131,7 @@ def v1_retail_prices(
     snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
     Defaults to the most recent snapshot when omitted.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_retail_prices,
         region,
         sku,
@@ -139,7 +142,7 @@ def v1_retail_prices(
     )
 
 
-def v1_eviction_rates(
+async def v1_eviction_rates(
     region: str = "",
     sku: str = "",
     snapshot_date: str = "",
@@ -151,7 +154,7 @@ def v1_eviction_rates(
     snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
     Defaults to the most recent snapshot when omitted.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_eviction_rates,
         region,
         sku,
@@ -161,7 +164,7 @@ def v1_eviction_rates(
     )
 
 
-def v1_eviction_rates_latest(
+async def v1_eviction_rates_latest(
     region: str = "",
     sku: str = "",
     snapshot_date: str = "",
@@ -172,7 +175,7 @@ def v1_eviction_rates_latest(
     snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
     Defaults to the most recent snapshot when omitted.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_eviction_rates_latest,
         region,
         sku,
@@ -186,15 +189,15 @@ def v1_eviction_rates_latest(
 # ==================================================================
 
 
-def v1_pricing_categories(
+async def v1_pricing_categories(
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
     """List distinct pricing categories from pre-aggregated price summaries. Paginated."""
-    return _safe_call(_api_v1_pricing_categories, limit, cursor)
+    return await _safe_call(_api_v1_pricing_categories, limit, cursor)
 
 
-def v1_pricing_summary(
+async def v1_pricing_summary(
     region: str = "",
     category: str = "",
     price_type: str = "",
@@ -209,7 +212,7 @@ def v1_pricing_summary(
     snapshot_since (ISO datetime).
     Returns avg, median, min, max, and percentile prices per region/category.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_pricing_summary,
         region,
         category,
@@ -221,7 +224,7 @@ def v1_pricing_summary(
     )
 
 
-def v1_pricing_summary_latest(
+async def v1_pricing_summary_latest(
     region: str = "",
     category: str = "",
     price_type: str = "",
@@ -230,7 +233,7 @@ def v1_pricing_summary_latest(
     currency: str = "",
 ) -> dict[str, Any]:
     """Latest price summary snapshot (most recent aggregation run). Paginated."""
-    return _safe_call(
+    return await _safe_call(
         _api_v1_pricing_summary_latest,
         region,
         category,
@@ -241,7 +244,7 @@ def v1_pricing_summary_latest(
     )
 
 
-def v1_pricing_summary_series(
+async def v1_pricing_summary_series(
     region: str,
     price_type: str,
     bucket: str,
@@ -253,7 +256,7 @@ def v1_pricing_summary_series(
 
     bucket: day|week|month.  metric: avg|median|min|max|p10|p25|p75|p90.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_pricing_summary_series,
         region,
         price_type,
@@ -264,7 +267,7 @@ def v1_pricing_summary_series(
     )
 
 
-def v1_pricing_cheapest(
+async def v1_pricing_cheapest(
     price_type: str = "retail",
     metric: str = "median",
     category: str = "",
@@ -272,7 +275,7 @@ def v1_pricing_cheapest(
     currency: str = "",
 ) -> dict[str, Any]:
     """Top N cheapest Azure regions from latest run, ranked by a pricing metric."""
-    return _safe_call(_api_v1_pricing_cheapest, price_type, metric, category, limit, currency)
+    return await _safe_call(_api_v1_pricing_cheapest, price_type, metric, category, limit, currency)
 
 
 # ==================================================================
@@ -280,7 +283,7 @@ def v1_pricing_cheapest(
 # ==================================================================
 
 
-def v1_sku_catalog(
+async def v1_sku_catalog(
     search: str = "",
     category: str = "",
     family: str = "",
@@ -290,7 +293,7 @@ def v1_sku_catalog(
     cursor: str = "",
 ) -> dict[str, Any]:
     """Browse the full VM SKU catalog. Filter by search, category, family, vCPUs. Paginated."""
-    return _safe_call(
+    return await _safe_call(
         _api_v1_sku_catalog,
         search=search,
         category=category,
@@ -307,24 +310,26 @@ def v1_sku_catalog(
 # ==================================================================
 
 
-def v1_jobs(
+async def v1_jobs(
     dataset: str = "",
     status: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
     """List ingestion job runs. Filter by dataset and status. Paginated (newest first)."""
-    return _safe_call(_api_v1_jobs, dataset=dataset, status=status, limit=limit, cursor=cursor)
+    return await _safe_call(
+        _api_v1_jobs, dataset=dataset, status=status, limit=limit, cursor=cursor
+    )
 
 
-def v1_job_logs(
+async def v1_job_logs(
     run_id: str,
     level: str = "",
     limit: int = 1000,
     cursor: str = "",
 ) -> dict[str, Any]:
     """List log entries for a specific job run. Filter by level. Paginated (newest first)."""
-    return _safe_call(_api_v1_job_logs, run_id, level=level, limit=limit, cursor=cursor)
+    return await _safe_call(_api_v1_job_logs, run_id, level=level, limit=limit, cursor=cursor)
 
 
 # ==================================================================
@@ -332,17 +337,17 @@ def v1_job_logs(
 # ==================================================================
 
 
-def v1_spot_prices_series(
+async def v1_spot_prices_series(
     region: str,
     sku: str,
     os_type: str = "",
     bucket: str = "day",
 ) -> dict[str, Any]:
     """Spot price time series from JSONB history, bucketed by day/week/month."""
-    return _safe_call(_api_v1_spot_prices_series, region, sku, os_type=os_type, bucket=bucket)
+    return await _safe_call(_api_v1_spot_prices_series, region, sku, os_type=os_type, bucket=bucket)
 
 
-def v1_spot_detail(
+async def v1_spot_detail(
     region: str,
     sku: str,
     os_type: str = "",
@@ -353,7 +358,7 @@ def v1_spot_detail(
     snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
     Defaults to the most recent snapshot when omitted.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_spot_detail,
         region,
         sku,
@@ -367,7 +372,7 @@ def v1_spot_detail(
 # ==================================================================
 
 
-def v1_retail_prices_compare(
+async def v1_retail_prices_compare(
     sku: str,
     currency: str = "",
     pricing_type: str = "",
@@ -378,7 +383,7 @@ def v1_retail_prices_compare(
     snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
     Defaults to the most recent snapshot when omitted.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_retail_prices_compare,
         sku,
         currency=currency,
@@ -387,7 +392,7 @@ def v1_retail_prices_compare(
     )
 
 
-def v1_savings_plans(
+async def v1_savings_plans(
     region: str = "",
     sku: str = "",
     currency: str = "",
@@ -400,7 +405,7 @@ def v1_savings_plans(
     snapshot_date: ISO datetime — scope to the latest snapshot <= this value.
     Defaults to the most recent snapshot when omitted.
     """
-    return _safe_call(
+    return await _safe_call(
         _api_v1_savings_plans,
         region=region,
         sku=sku,
@@ -416,14 +421,14 @@ def v1_savings_plans(
 # ==================================================================
 
 
-def v1_pricing_summary_compare(
+async def v1_pricing_summary_compare(
     regions: list[str],
     price_type: str = "",
     category: str = "",
     currency: str = "",
 ) -> dict[str, Any]:
     """Compare pricing summaries across multiple regions from the latest run."""
-    return _safe_call(
+    return await _safe_call(
         _api_v1_pricing_summary_compare,
         regions,
         price_type=price_type,
@@ -432,6 +437,6 @@ def v1_pricing_summary_compare(
     )
 
 
-def v1_stats() -> dict[str, Any]:
+async def v1_stats() -> dict[str, Any]:
     """Global dashboard stats: table row counts, distinct regions/SKUs, data freshness."""
-    return _safe_call(_api_v1_stats)
+    return await _safe_call(_api_v1_stats)

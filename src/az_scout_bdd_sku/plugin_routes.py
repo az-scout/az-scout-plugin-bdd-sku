@@ -45,7 +45,7 @@ async def status() -> dict[str, Any] | JSONResponse:
     from az_scout_bdd_sku.api_client import get_status
 
     try:
-        data = get_status()
+        data = await get_status()
         data["configured"] = True
         return data
     except Exception as exc:
@@ -92,5 +92,5 @@ async def test_settings() -> dict[str, Any]:
     from az_scout_bdd_sku.api_client import test_connection
 
     url = get_config().api_base_url
-    result = test_connection(url)
+    result = await test_connection(url)
     return result

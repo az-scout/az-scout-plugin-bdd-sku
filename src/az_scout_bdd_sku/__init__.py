@@ -97,17 +97,7 @@ class BddSkuPlugin:
         return _STATIC_DIR
 
     def get_tabs(self) -> list[TabDefinition] | None:
-        from az_scout.plugin_api import TabDefinition as _TabDef
-
-        return [
-            _TabDef(
-                id="bdd-sku",
-                label="SKU DB Cache",
-                icon="bi bi-database",
-                js_entry="js/bdd-sku-tab.js",
-                css_entry="css/bdd-sku.css",
-            )
-        ]
+        return None
 
     def get_chat_modes(self) -> list[ChatMode] | None:
         return None
