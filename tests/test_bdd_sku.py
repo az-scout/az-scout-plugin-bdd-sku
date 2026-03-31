@@ -40,6 +40,17 @@ def _mock_httpx_response(json_data: dict, status_code: int = 200) -> httpx.Respo
     return resp
 
 
+def _mock_client(response: httpx.Response | None = None, *, side_effect: Exception | None = None) -> AsyncMock:
+    """Return a mock httpx.AsyncClient with a pre-configured `.get()` method."""
+    mock = AsyncMock(spec=httpx.AsyncClient)
+    mock.is_closed = False
+    if side_effect:
+        mock.get.side_effect = side_effect
+    elif response:
+        mock.get.return_value = response
+    return mock
+
+
 # ------------------------------------------------------------------
 # Plugin routes: GET /status
 # ------------------------------------------------------------------
@@ -51,10 +62,10 @@ class TestPluginStatus:
     @patch("az_scout_bdd_sku.plugin_routes.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.get_config")
-    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
+    @patch("az_scout_bdd_sku.api_client._get_client")
     def test_status_returns_api_data(
         self,
-        mock_client_cls: MagicMock,
+        mock_get_client: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg_client: MagicMock,
         mock_is_cfg_routes: MagicMock,
@@ -71,10 +82,7 @@ class TestPluginStatus:
             "last_run": {"status": "ok", "items_written": 950},
             "last_run_spot": None,
         }
-        mock_async_client = AsyncMock()
-        mock_async_client.get.return_value = _mock_httpx_response(json_data)
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_get_client.return_value = _mock_client(_mock_httpx_response(json_data))
 
         resp = client.get("/plugins/bdd-sku/status")
         assert resp.status_code == 200
@@ -98,20 +106,17 @@ class TestPluginStatus:
     @patch("az_scout_bdd_sku.plugin_routes.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.get_config")
-    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
+    @patch("az_scout_bdd_sku.api_client._get_client")
     def test_status_api_error_returns_502(
         self,
-        mock_client_cls: MagicMock,
+        mock_get_client: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg_client: MagicMock,
         mock_is_cfg_routes: MagicMock,
         client: TestClient,
     ) -> None:
         mock_cfg.return_value.api_base_url = "https://api.example.com"
-        mock_async_client = AsyncMock()
-        mock_async_client.get.side_effect = httpx.ConnectError("refused")
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_get_client.return_value = _mock_client(side_effect=httpx.ConnectError("refused"))
 
         resp = client.get("/plugins/bdd-sku/status")
         assert resp.status_code == 502
@@ -173,19 +178,16 @@ class TestPluginSettings:
 
     @patch("az_scout_bdd_sku.plugin_routes.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.plugin_routes.get_config")
-    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
+    @patch("az_scout_bdd_sku.api_client._get_client")
     def test_test_connection_ok(
         self,
-        mock_client_cls: MagicMock,
+        mock_get_client: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg: MagicMock,
         client: TestClient,
     ) -> None:
         mock_cfg.return_value.api_base_url = "https://api.example.com"
-        mock_async_client = AsyncMock()
-        mock_async_client.get.return_value = _mock_httpx_response({"status": "healthy"})
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_get_client.return_value = _mock_client(_mock_httpx_response({"status": "healthy"}))
 
         resp = client.post("/plugins/bdd-sku/settings/test")
         assert resp.status_code == 200
@@ -215,10 +217,10 @@ class TestCacheStatusTool:
 
     @patch("az_scout_bdd_sku.api_client.is_configured", return_value=True)
     @patch("az_scout_bdd_sku.api_client.get_config")
-    @patch("az_scout_bdd_sku.api_client.httpx.AsyncClient")
+    @patch("az_scout_bdd_sku.api_client._get_client")
     def test_cache_status_returns_data(
         self,
-        mock_client_cls: MagicMock,
+        mock_get_client: MagicMock,
         mock_cfg: MagicMock,
         mock_is_cfg: MagicMock,
     ) -> None:
@@ -229,10 +231,7 @@ class TestCacheStatusTool:
             "db_connected": True,
             "retail_prices_count": 100,
         }
-        mock_async_client = AsyncMock()
-        mock_async_client.get.return_value = _mock_httpx_response(json_data)
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_async_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_get_client.return_value = _mock_client(_mock_httpx_response(json_data))
 
         result = _run_async(cache_status())
         assert result["db_connected"] is True

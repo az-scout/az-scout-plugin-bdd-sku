@@ -4,10 +4,14 @@ All functions are **async** and use ``httpx.AsyncClient`` so they never
 block the FastAPI event loop when the upstream API is slow or unreachable.
 
 The base URL is read from ``plugin_config.get_config().api_base_url``.
+
+A module-level client is reused across requests for connection pooling.
+Transient errors (429, 5xx) are retried with exponential back-off.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -18,6 +22,12 @@ from az_scout_bdd_sku.plugin_config import get_config, is_configured
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30
+_MAX_RETRIES = 3
+_BACKOFF_BASE = 1.0  # seconds
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+# Reusable async client — created lazily, closed on module teardown.
+_client: httpx.AsyncClient | None = None
 
 
 class ApiNotConfiguredError(Exception):
@@ -31,16 +41,76 @@ def _base_url() -> str:
     return get_config().api_base_url.rstrip("/")
 
 
+def _get_client() -> httpx.AsyncClient:
+    """Return the shared async client, creating it on first use."""
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            timeout=_TIMEOUT,
+            follow_redirects=True,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30,
+            ),
+        )
+    return _client
+
+
 async def _get(path: str, params: dict[str, Any] | None = None) -> Any:
-    """Issue an async GET request and return the parsed JSON response."""
+    """Issue an async GET with retry logic and return the parsed JSON response."""
     url = f"{_base_url()}{path}"
     if params:
-        # Drop empty/None values
         params = {k: v for k, v in params.items() if v is not None and v != ""}
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url, params=params, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()
+
+    client = _get_client()
+    last_exc: Exception | None = None
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = await client.get(url, params=params)
+            if resp.status_code not in _RETRYABLE_STATUS:
+                resp.raise_for_status()
+                return resp.json()
+            # Retryable status — log and retry
+            delay = _BACKOFF_BASE * (2 ** attempt)
+            retry_after = resp.headers.get("retry-after")
+            if retry_after:
+                try:
+                    delay = max(delay, float(retry_after))
+                except ValueError:
+                    pass
+            logger.warning(
+                "BDD-API %s returned %d, retry %d/%d in %.1fs",
+                path, resp.status_code, attempt + 1, _MAX_RETRIES, delay,
+            )
+            last_exc = httpx.HTTPStatusError(
+                f"{resp.status_code}", request=resp.request, response=resp,
+            )
+            await asyncio.sleep(delay)
+        except httpx.TimeoutException as exc:
+            delay = _BACKOFF_BASE * (2 ** attempt)
+            logger.warning(
+                "BDD-API %s timeout, retry %d/%d in %.1fs",
+                path, attempt + 1, _MAX_RETRIES, delay,
+            )
+            last_exc = exc
+            await asyncio.sleep(delay)
+        except httpx.HTTPStatusError:
+            raise  # non-retryable HTTP errors propagate immediately
+        except httpx.HTTPError as exc:
+            delay = _BACKOFF_BASE * (2 ** attempt)
+            logger.warning(
+                "BDD-API %s connection error: %s, retry %d/%d in %.1fs",
+                path, exc, attempt + 1, _MAX_RETRIES, delay,
+            )
+            last_exc = exc
+            await asyncio.sleep(delay)
+
+    # All retries exhausted
+    if last_exc is not None:
+        raise last_exc
+    raise httpx.HTTPError(f"Request to {url} failed after {_MAX_RETRIES} retries")
 
 
 # ------------------------------------------------------------------
@@ -170,11 +240,11 @@ async def v1_eviction_rates_latest(
 async def test_connection(url: str) -> dict[str, Any]:
     """Test connectivity to *url* by hitting /health. Returns status dict."""
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{url.rstrip('/')}/health", timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            return {"ok": True, "status": data.get("status", "unknown")}
+        client = _get_client()
+        resp = await client.get(f"{url.rstrip('/')}/health", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return {"ok": True, "status": data.get("status", "unknown")}
     except httpx.HTTPError as exc:
         return {"ok": False, "error": str(exc)}
 
